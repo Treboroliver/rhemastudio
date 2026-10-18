@@ -1,0 +1,144 @@
+# 02 — Formato dos módulos theWord
+
+> **Status do documento:** parte confirmada em fontes públicas, parte vinda de conhecimento prévio e marcada `[VERIFICAR]`. A tarefa **M1.1** existe justamente para fechar essas lacunas com módulos reais. **O formato real vence este documento.**
+
+## 1. Famílias de módulos
+
+| Extensão | Conteúdo | Formato | Status |
+|---|---|---|---|
+| `.ont` | Bíblia completa (AT + NT) | Texto simples + tags + propriedades no fim | Confirmado |
+| `.ot` | Somente Antigo Testamento | idem | Confirmado |
+| `.nt` | Somente Novo Testamento | idem | Confirmado |
+| `.cmt.twm` | Comentário (ligado a versículo, faixa, capítulo ou livro) | SQLite | Confirmado (SQLite) |
+| `.gbk.twm` | Livro geral (capítulos/seções) | SQLite | Confirmado (SQLite) |
+| `.dct.twm` | Dicionário / léxico (ex.: Strong) | SQLite | `[VERIFICAR]` nome exato |
+| `.dev.twm` | Devocional diário | SQLite | Confirmado (extensão) |
+| `.gbk.twm` híbrido | Livro com ligações a versículos (como comentário) | SQLite | Confirmado (conceito) |
+| Outros `.twm` | Mapas, imagens, etc. | SQLite | Fora do MVP |
+
+Todo `.twm` é um **banco SQLite**. Módulos antigos de dicionário/comentário podem existir em formatos legados; no MVP, ignorar com aviso amigável.
+
+Locais comuns no Windows: `C:\ProgramData\The Word\` (subpastas de Bíblias e Livros). Permitir ao usuário escolher outras pastas; em Linux/macOS, sempre perguntar a pasta.
+
+## 2. Bíblias `.ont` / `.ot` / `.nt`
+
+### 2.1 Estrutura de arquivo
+- Texto simples, **uma linha por versículo**, na ordem canônica dos 66 livros.
+- Após o último versículo, bloco de **propriedades** `chave=valor` (título, descrição, abreviação, data de versão, idioma, etc.).
+- Contagem esperada de linhas de versículos `[VERIFICAR]`: `.ot` = 23.145 · `.nt` = 7.957 · `.ont` = 31.102.
+- O primeiro versículo do `.nt` é Mateus 1:1; do `.ot`/`.ont`, Gênesis 1:1.
+- Codificação: tentar UTF-8 (com/sem BOM); se inválido, consultar propriedade de charset `[VERIFICAR]` e, em último caso, Windows-1252. Registrar a escolha.
+
+### 2.2 Mapeamento linha → referência
+Usar tabela canônica de versículos por capítulo (versificação padrão protestante, 66 livros). A tabela vive em `rhema-core` como dado estático e é validada por teste: soma = 31.102.
+
+Se o número de linhas não bater, o módulo é marcado como **"versificação não padrão"** e abre em modo degradado (por linha) com aviso. Nunca travar.
+
+### 2.3 Marcação dentro do versículo `[VERIFICAR TODAS]`
+Tags conhecidas do texto theWord (confirmar com módulos reais e com a documentação oficial do formato):
+
+| Tag (abre/fecha) | Significado | Nó em `RichText` |
+|---|---|---|
+| `<TS>…<Ts>` (e variações de nível) | Título de seção | `Heading(nível)` |
+| `<CM>` | Quebra de parágrafo | `Paragraph` |
+| `<CL>` | Quebra de linha | `LineBreak` |
+| `<FI>…<Fi>` | Itálico (palavras adicionadas) | `Italic` |
+| `<FR>…<Fr>` | Palavras de Jesus | `WordsOfJesus` |
+| `<FO>…<Fo>` | Citação do AT | `OtQuote` |
+| `<WG####>` | Número de Strong grego | `Strong{Greek, n}` |
+| `<WH####>` | Número de Strong hebraico | `Strong{Hebrew, n}` |
+| `<WT…>` | Morfologia | `Morph(código)` |
+| `<RF>…<Rf>` | Nota de rodapé | `Note` |
+| `<RX …>` | Referência cruzada | `XRef(VerseRange)` |
+
+**Regras do tokenizador:**
+- Case-sensitive (abertura/fechamento diferem pela caixa).
+- **Tag desconhecida nunca falha:** vira nó `UnknownTag{name, raw}` e o texto interno é preservado.
+- Tags desbalanceadas são fechadas automaticamente no fim do versículo.
+- O número de Strong **se liga à palavra que o precede**; guardar a posição para o clique.
+- Entidades e símbolos especiais: preservar; sanitizar ao renderizar (nunca injetar HTML bruto do módulo).
+
+### 2.4 Propriedades de módulo
+Ler todas as linhas `chave=valor` ao final e guardar em `HashMap<String,String>`. Campos que a interface usa: título, abreviação, descrição, idioma, data da versão, indicação de Strong/morfologia. Chaves ausentes nunca são erro.
+
+## 3. Módulos `.twm` (SQLite)
+
+**Não presuma nomes de tabelas.** A tarefa M1.1 cria o comando `rhema-cli inspect <arquivo.twm>` que:
+1. abre o arquivo em somente leitura;
+2. imprime `sqlite_master` (tabelas, índices, DDL);
+3. mostra 5 linhas de amostra de cada tabela;
+4. lista conteúdo da tabela de metadados/detalhes (título, tipo, versão).
+
+O resultado das inspeções é colado em `docs/02-apendice-schemas.md` (um bloco por tipo: `cmt`, `gbk`, `dct`, `dev`), e **só então** se escrevem os leitores definitivos.
+
+### Comportamento esperado por tipo
+- **Comentário (`cmt`):** cada entrada vincula-se a um versículo, faixa, capítulo ou livro. Consulta: dado `VerseRef`, retornar entradas cuja faixa o contém, da mais específica para a mais ampla. Neste formato não existem parágrafos.
+- **Dicionário (`dct`):** busca por chave exata (`G25`, `H1254`, ou palavra). Strong grego/hebraico são os casos principais.
+- **Livro (`gbk`):** árvore de capítulos/seções; leitura sequencial; busca no texto. Híbrido: ligações a versículos aparecem como chips.
+- **Devocional (`dev`):** entradas por data (dia/mês).
+- Conteúdo textual pode conter marcação própria (links, formatação). Mesmo tokenizador tolerante; se o formato diferir, criar módulo `markup_twm` separado.
+
+## 4. Strong e léxico
+- Bíblia com Strong: tags `<WG…>`/`<WH…>`.
+- Clique no número → consulta ao dicionário configurado como "léxico padrão" para o idioma (`G25` → entrada).
+- Se não houver dicionário instalado, o painel mostra o número e convida a instalar um módulo.
+- Busca por Strong: índice invertido `strong_id → [VerseRef]` por módulo.
+
+## 5. Modelo interno (referência)
+
+```rust
+pub enum ModuleKind { Bible, Commentary, Dictionary, Book, Devotional, Unknown }
+
+pub struct ModuleInfo {
+    pub id: String,            // hash estável do caminho + tamanho + mtime
+    pub path: PathBuf,
+    pub kind: ModuleKind,
+    pub title: String,
+    pub abbreviation: Option<String>,
+    pub language: Option<String>,
+    pub has_strong: bool,
+    pub props: HashMap<String, String>,
+}
+
+pub enum Node {
+    Text(String),
+    Italic(Vec<Node>),
+    WordsOfJesus(Vec<Node>),
+    OtQuote(Vec<Node>),
+    Heading(u8, Vec<Node>),
+    Strong { lang: StrongLang, num: u32, children: Vec<Node> },
+    Morph(String),
+    Note(Vec<Node>),
+    XRef(VerseRange),
+    Paragraph,
+    LineBreak,
+    UnknownTag { name: String, raw: String },
+}
+
+pub trait BibleSource {
+    fn info(&self) -> &ModuleInfo;
+    fn verse(&self, r: VerseRef) -> Result<Vec<Node>, ModuleError>;
+    fn chapter(&self, book: Book, ch: u16) -> Result<Vec<(u16, Vec<Node>)>, ModuleError>;
+}
+```
+
+## 6. Estratégia de leitura eficiente
+- `.ont`: mapear arquivo em memória (`memmap2`) e indexar **offsets de linha** na abertura (≈31 mil inteiros). Verso sob demanda; nada de carregar tudo em `String`.
+- `.twm`: conexão SQLite somente leitura, `PRAGMA query_only=ON`, statements preparados em cache.
+- Catálogo de módulos em cache (`catalog.json` por pasta, invalidado por mtime/tamanho) para abertura instantânea.
+
+## 7. Fixtures e testes
+- `tools/gen-fixtures` gera módulos **sintéticos**: um `.ont` mínimo com todas as tags, um `.twm` de comentário e um de dicionário (após M1.1).
+- Testes de propriedade (`proptest`): qualquer string de entrada no tokenizador produz `Vec<Node>` sem pânico e preserva o texto visível.
+- Teste de ouro: contagem total de versículos = 31.102 com tabela canônica.
+- Módulos reais protegidos nunca entram no repositório; o desenvolvedor testa localmente com seus próprios módulos via variável `RHEMA_TEST_MODULES`.
+
+## 8. Itens a verificar na M1.1 (checklist)
+- [ ] Contagem de linhas de `.ot`, `.nt`, `.ont`
+- [ ] Lista completa de tags e suas variações de caixa
+- [ ] Nome e formato da propriedade de charset/idioma
+- [ ] Schema SQLite de `cmt`, `gbk`, `dct`, `dev`
+- [ ] Representação de faixas de versículos nos comentários
+- [ ] Marcação interna do conteúdo `.twm`
+- [ ] Como Strong grego/hebraico é nomeado nas chaves do dicionário
+- [ ] Existência de módulos com Apócrifos ou versificação diferente

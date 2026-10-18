@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rhema-core",
+    "crates/rhema-refs",
+    "crates/rhema-twformat",
+    "crates/rhema-library",
+    "crates/rhema-search",
+    "crates/rhema-sermon",
+    "crates/rhema-cli",
+    "tools/gen-fixtures",
+    "app/src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["RhemaStudio Contributors"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+rhema-core = { path = "crates/rhema-core" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+anyhow = "1.0"
