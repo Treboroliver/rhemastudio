@@ -1,5 +1,16 @@
-
 target/
 node_modules/
 dist/
 .DS_Store
+
+# Módulos theWord e pastas de teste locais
+*.ont
+*.ontx
+*.ot
+*.nt
+*.twm
+*.mybible
+modulos/
+modules/
+modulos-teste/
+test-modules/

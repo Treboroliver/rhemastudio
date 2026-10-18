@@ -1,22 +1,23 @@
 # 02 — Formato dos módulos theWord
 
-> **Status do documento:** parte confirmada em fontes públicas, parte vinda de conhecimento prévio e marcada `[VERIFICAR]`. A tarefa **M1.1** existe justamente para fechar essas lacunas com módulos reais. **O formato real vence este documento.**
+> **Status do documento:** Especificação refinada e validada contra módulos reais na tarefa **M1.1**. O apêndice detalhado de schemas e DDLs reais encontra-se em `docs/02-apendice-schemas.md`.
 
 ## 1. Famílias de módulos
 
 | Extensão | Conteúdo | Formato | Status |
 |---|---|---|---|
-| `.ont` | Bíblia completa (AT + NT) | Texto simples + tags + propriedades no fim | Confirmado |
-| `.ot` | Somente Antigo Testamento | idem | Confirmado |
-| `.nt` | Somente Novo Testamento | idem | Confirmado |
-| `.cmt.twm` | Comentário (ligado a versículo, faixa, capítulo ou livro) | SQLite | Confirmado (SQLite) |
+| `.ont` | Bíblia completa (AT + NT) | Texto simples + tags + propriedades no fim | Confirmado (31.102 versículos) |
+| `.ot` | Somente Antigo Testamento | idem | Confirmado (23.145 versículos) |
+| `.nt` | Somente Novo Testamento | idem | Confirmado (7.957 versículos) |
+| `.cmt.twm` | Comentário (ligado a versículo, faixa, capítulo ou livro) | SQLite | Confirmado (tabelas `bible_refs`, `content`, `config`) |
 | `.gbk.twm` | Livro geral (capítulos/seções) | SQLite | Confirmado (SQLite) |
-| `.dct.twm` | Dicionário / léxico (ex.: Strong) | SQLite | `[VERIFICAR]` nome exato |
+| `.dct.twm` | Dicionário / léxico (ex.: Strong) | SQLite | Confirmado (tabelas `topics`, `content`, `config`) |
 | `.dev.twm` | Devocional diário | SQLite | Confirmado (extensão) |
 | `.gbk.twm` híbrido | Livro com ligações a versículos (como comentário) | SQLite | Confirmado (conceito) |
+| `.ontx` / `.twmx` | Módulos Encriptados (DRM) | Binário proprietário (Magic: `TWENCBMOD`) | Não suportado (rejeição com aviso) |
 | Outros `.twm` | Mapas, imagens, etc. | SQLite | Fora do MVP |
 
-Todo `.twm` é um **banco SQLite**. Módulos antigos de dicionário/comentário podem existir em formatos legados; no MVP, ignorar com aviso amigável.
+Todo `.twm` é um **banco SQLite**. Módulos com sufixo `x` (`.ontx`, `.twmx`) possuem assinatura `TWENCBMOD` e são encriptados por DRM proprietário; são ignorados com aviso amigável.
 
 Locais comuns no Windows: `C:\ProgramData\The Word\` (subpastas de Bíblias e Livros). Permitir ao usuário escolher outras pastas; em Linux/macOS, sempre perguntar a pasta.
 
@@ -25,17 +26,17 @@ Locais comuns no Windows: `C:\ProgramData\The Word\` (subpastas de Bíblias e Li
 ### 2.1 Estrutura de arquivo
 - Texto simples, **uma linha por versículo**, na ordem canônica dos 66 livros.
 - Após o último versículo, bloco de **propriedades** `chave=valor` (título, descrição, abreviação, data de versão, idioma, etc.).
-- Contagem esperada de linhas de versículos `[VERIFICAR]`: `.ot` = 23.145 · `.nt` = 7.957 · `.ont` = 31.102.
+- Contagem esperada de linhas de versículos (Confirmado no `kjv.ont`): `.ot` = 23.145 · `.nt` = 7.957 · `.ont` = 31.102.
 - O primeiro versículo do `.nt` é Mateus 1:1; do `.ot`/`.ont`, Gênesis 1:1.
-- Codificação: tentar UTF-8 (com/sem BOM); se inválido, consultar propriedade de charset `[VERIFICAR]` e, em último caso, Windows-1252. Registrar a escolha.
+- Codificação: tentar UTF-8 (com/sem BOM); se inválido, consultar propriedade de `charset` (`0` = ANSI Windows-1252, `65001` = UTF-8) e, em último caso, Windows-1252. Confirmado no `kjv.ont` (`charset=0`).
 
 ### 2.2 Mapeamento linha → referência
 Usar tabela canônica de versículos por capítulo (versificação padrão protestante, 66 livros). A tabela vive em `rhema-core` como dado estático e é validada por teste: soma = 31.102.
 
 Se o número de linhas não bater, o módulo é marcado como **"versificação não padrão"** e abre em modo degradado (por linha) com aviso. Nunca travar.
 
-### 2.3 Marcação dentro do versículo `[VERIFICAR TODAS]`
-Tags conhecidas do texto theWord (confirmar com módulos reais e com a documentação oficial do formato):
+### 2.3 Marcação dentro do versículo (Confirmado)
+Tags conhecidas e validadas contra módulos reais (ex.: `kjv.ont`):
 
 | Tag (abre/fecha) | Significado | Nó em `RichText` |
 |---|---|---|
@@ -133,12 +134,13 @@ pub trait BibleSource {
 - Teste de ouro: contagem total de versículos = 31.102 com tabela canônica.
 - Módulos reais protegidos nunca entram no repositório; o desenvolvedor testa localmente com seus próprios módulos via variável `RHEMA_TEST_MODULES`.
 
-## 8. Itens a verificar na M1.1 (checklist)
-- [ ] Contagem de linhas de `.ot`, `.nt`, `.ont`
-- [ ] Lista completa de tags e suas variações de caixa
-- [ ] Nome e formato da propriedade de charset/idioma
-- [ ] Schema SQLite de `cmt`, `gbk`, `dct`, `dev`
-- [ ] Representação de faixas de versículos nos comentários
-- [ ] Marcação interna do conteúdo `.twm`
-- [ ] Como Strong grego/hebraico é nomeado nas chaves do dicionário
-- [ ] Existência de módulos com Apócrifos ou versificação diferente
+## 8. Itens verificados na M1.1 (checklist)
+- [x] Contagem de linhas de `.ot` (23.145), `.nt` (7.957), `.ont` (31.102) — Confirmado com `kjv.ont`
+- [x] Lista completa de tags e suas variações de caixa — Confirmado com `kjv.ont` (485.927 tags analisadas)
+- [x] Nome e formato da propriedade de charset/idioma — Confirmado (`charset=0` para Win-1252, `lang=eng`)
+- [x] Schema SQLite de `cmt` e `dct` — Confirmado e documentado em `docs/02-apendice-schemas.md`
+- [x] Representação de faixas de versículos nos comentários — Confirmado (`bi, ci, fvi, tvi` em `bible_refs`)
+- [x] Marcação interna do conteúdo `.twm` — Confirmado (RTF `{\rtf1...}` em `content.data`)
+- [x] Como Strong grego/hebraico é nomeado nas chaves do dicionário — Confirmado (`G{n}` e `H{n}` sem zeros à esquerda)
+- [x] Assinatura de módulos encriptados / DRM — Confirmado (Magic `TWENCBMOD` em `.ontx`)
+- [ ] Existência de módulos com Apócrifos ou versificação diferente (suporte degradado por número de linha planejado)
