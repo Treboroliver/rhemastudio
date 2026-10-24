@@ -44,6 +44,9 @@ pub enum ModuleError {
     #[error("Versículo {0} não encontrado no módulo")]
     VerseNotFound(VerseRef),
 
+    #[error("Referência bíblica inválida: {0}")]
+    InvalidReference(VerseRef),
+
     #[error("Livro {0:?} não está presente no módulo (escopo: {1})")]
     BookNotInModule(Book, String),
 

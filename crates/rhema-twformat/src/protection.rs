@@ -29,7 +29,10 @@ pub fn ensure_twm_unprotected(path: impl AsRef<Path>) -> Result<(), ModuleError>
     }
 
     let mut statement = connection
-        .prepare("SELECT name, value FROM config")
+        .prepare(
+            "SELECT name, value FROM config \
+             WHERE lower(trim(name)) IN ('do.encrypt', 'secure')",
+        )
         .map_err(|error| ModuleError::Corrupted(error.to_string()))?;
     let mut rows = statement
         .query([])
@@ -44,12 +47,7 @@ pub fn ensure_twm_unprotected(path: impl AsRef<Path>) -> Result<(), ModuleError>
         let value = row
             .get::<_, Option<String>>(1)
             .map_err(|error| ModuleError::Corrupted(error.to_string()))?;
-        let protected_key = name.as_deref().is_some_and(|name| {
-            matches!(
-                name.trim().to_ascii_lowercase().as_str(),
-                "do.encrypt" | "secure"
-            )
-        });
+        let protected_key = name.is_some();
         let enabled = value.as_deref().is_some_and(|value| {
             matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true")
         });

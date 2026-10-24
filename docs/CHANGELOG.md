@@ -1,11 +1,21 @@
 # Changelog — RhemaStudio
 
+## [M1.4] — 2026-10-24
+
+### Concluído
+- `TwmModule::open`: SQLite read-only + `query_only`, valida proteção antes de conteúdo, carrega config e detecta comentário/dicionário.
+- `CommentarySource` carrega referências em memória, valida `VerseRef`, ordena escopos específico→amplo e busca RTF sob demanda. Erros RVF são isolados no conteúdo da entrada.
+- `DictionarySource` implementa lookup de `subject` sem diferenciar caixa, chave Strong, prefixo literal e busca limitada por `topics_wordindex`.
+- Gerador produz fixtures sintéticas cmt/dct RTF, entradas RVF, e módulos protegidos com `do.encrypt=1` e `secure=1`; CLI `dump-cmt`/`dump-dct` limita saída a 40 linhas/1.500 caracteres.
+- Teste release nos módulos permitidos, somente leitura: Holman 30,3 ms abrir/0,033 ms João 3:16; NICNT 10,3/31,2 ms; VidaNova 40,6/0,002 ms; Strong_AMG2 6,1/3,6 ms (abertura/consulta G25). As 500 consultas aleatórias em cada comentário completaram sem pânico (1,75 s Holman; 6,95 s NICNT; 0,14 s VidaNova). Uma execução inicial de VidaNova levou 938,9 ms; a checagem de proteção então lia a configuração completa (~10,16 MB) antes de `TwmModule` carregá-la de novo. Depois que a checagem passou a selecionar somente as flags, as aberturas release ficaram abaixo de 200 ms. Holman tem duas referências com `fvi>tvi`; são ignoradas com aviso.
+- `.gbk`, `.dev` e M1.5 RVF permanecem pendentes; M2 não iniciada.
+
 ## [Adendo M1.4] — 2026-10-24
 
 ### Documentado
 - Tipo de conteúdo resolvido por entrada (`content_type` da linha; fallback para `config.content.type` apenas quando NULL); formato não suportado deve ser isolado à entrada, sem interromper `entries_for`.
 - Distribuições documentadas no apêndice: Holman 10.857 RTF/1 RVF; NICNT 5.785 RTF; Strong_AMG2 14.167 RTF/32 RVF; VidaNova 110 RVF. Mickelson não foi consultado por estar protegido.
-- Roadmap reserva M1.5 para parser RVF dependente de especificação; `.gbk` e `.dev` permanecem pendentes. M1.4 não foi iniciada.
+- Roadmap reserva M1.5 para parser RVF dependente de especificação; `.gbk` e `.dev` permanecem pendentes. Naquele adendo, M1.4 ainda não havia começado; a conclusão está registrada acima.
 
 ## [Complemento M1.3e] — 2026-10-24
 

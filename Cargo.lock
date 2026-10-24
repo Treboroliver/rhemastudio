@@ -1277,6 +1277,7 @@ dependencies = [
  "anyhow",
  "encoding_rs",
  "rhema-core",
+ "rusqlite",
 ]
 
 [[package]]

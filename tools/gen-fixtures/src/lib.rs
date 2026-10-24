@@ -4,6 +4,7 @@ use std::path::Path;
 
 use anyhow::Result;
 use rhema_core::{Book, Testament};
+use rusqlite::Connection;
 
 /// Gera bytes de um arquivo .ont canônico completo (31.102 versículos)
 pub fn synthetic_ont_bytes(charset: u32, with_strong: bool) -> Vec<u8> {
@@ -182,6 +183,86 @@ pub fn generate_synthetic_encrypted(path: &Path) -> Result<()> {
     let mut f = File::create(path)?;
     f.write_all(b"TWENCBMOD\x01\x02\x03\x04dados_encriptados_falsos_para_teste")?;
     Ok(())
+}
+
+pub fn generate_synthetic_commentary_twm(path: &Path) -> Result<()> {
+    let connection = create_twm(path, "2", "rtf")?;
+    connection.execute_batch(
+        "CREATE TABLE bible_refs (
+            topic_id INTEGER PRIMARY KEY,
+            bi INTEGER, ci INTEGER, fvi INTEGER, tvi INTEGER, content_type TEXT
+        );
+        CREATE TABLE content (topic_id INTEGER PRIMARY KEY, data BLOB, data2 BLOB);
+        INSERT INTO bible_refs VALUES
+            (10, 43, 0, 0, 0, NULL),
+            (20, 43, 3, 0, 0, 'rtf'),
+            (30, 43, 3, 16, 17, 'rtf'),
+            (40, 43, 3, 16, 16, 'rtf'),
+            (50, 43, 3, 17, 17, 'rvf'),
+            (60, 43, 3, 18, 0, 'rtf'),
+            (70, 43, 3, 6, 5, 'rtf');
+        INSERT INTO content VALUES
+            (10, '{\\rtf1 Synthetic book introduction}', NULL),
+            (20, '{\\rtf1 Synthetic chapter introduction}', NULL),
+            (30, '{\\rtf1 Synthetic verse range}', NULL),
+            (40, '{\\rtf1 Synthetic verse entry}', NULL),
+            (50, 'RVF fixture; deliberately unsupported', NULL),
+            (60, '{\\rtf1 Synthetic open-ended range}', NULL),
+            (70, '{\\rtf1 Synthetic invalid range}', NULL);",
+    )?;
+    Ok(())
+}
+
+pub fn generate_synthetic_dictionary_twm(path: &Path) -> Result<()> {
+    let connection = create_twm(path, "1", "rtf")?;
+    connection.execute_batch(
+        "CREATE TABLE topics (
+            id INTEGER PRIMARY KEY, pid INTEGER, subject TEXT, rel_order INTEGER,
+            content_type TEXT, strong_orig_word TEXT
+        );
+        CREATE TABLE content (topic_id INTEGER PRIMARY KEY, data TEXT, data2 BLOB);
+        CREATE TABLE topics_wordindex (id INTEGER, word TEXT, priority INTEGER);
+        INSERT INTO topics VALUES
+            (1, 0, 'G25', 1, NULL, NULL),
+            (2, 0, 'G26', 1, 'rvf', NULL),
+            (3, 0, 'H25', 1, 'rtf', NULL);
+        INSERT INTO content VALUES
+            (1, '{\\rtf1 Synthetic dictionary entry}', NULL),
+            (2, 'RVF fixture; deliberately unsupported', NULL),
+            (3, '{\\rtf1 Synthetic dictionary entry}', NULL);
+        INSERT INTO topics_wordindex VALUES (1, 'invented', 1);",
+    )?;
+    Ok(())
+}
+
+pub fn generate_synthetic_protected_twm(path: &Path, flag: &str) -> Result<()> {
+    if !matches!(flag, "do.encrypt" | "secure") {
+        anyhow::bail!("Flag de proteção sintética desconhecida");
+    }
+    let connection = Connection::open(path)?;
+    connection.execute_batch(
+        "CREATE TABLE config(name TEXT, value TEXT);
+         CREATE TABLE bible_refs(topic_id INTEGER, bi INTEGER, ci INTEGER, fvi INTEGER, tvi INTEGER, content_type TEXT);
+         CREATE TABLE content(topic_id INTEGER, data BLOB);",
+    )?;
+    connection.execute("INSERT INTO config(name, value) VALUES (?1, '1')", [flag])?;
+    connection.execute("INSERT INTO config(name, value) VALUES ('type', '2')", [])?;
+    drop(connection);
+    Ok(())
+}
+
+fn create_twm(path: &Path, kind: &str, content_type: &str) -> Result<Connection> {
+    let connection = Connection::open(path)?;
+    connection.execute_batch("CREATE TABLE config(name TEXT, value TEXT);")?;
+    connection.execute(
+        "INSERT INTO config(name, value) VALUES ('type', ?1)",
+        [kind],
+    )?;
+    connection.execute(
+        "INSERT INTO config(name, value) VALUES ('content.type', ?1)",
+        [content_type],
+    )?;
+    Ok(connection)
 }
 
 #[cfg(test)]

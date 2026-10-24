@@ -8,8 +8,8 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use rusqlite::{Connection, OpenFlags};
 
-use rhema_core::Book;
-use rhema_twformat::OntReader;
+use rhema_core::{Book, VerseRef};
+use rhema_twformat::{CommentarySource, DictionarySource, OntReader};
 
 #[derive(Parser)]
 #[command(
@@ -55,6 +55,34 @@ enum Commands {
         plain: bool,
     },
 
+    /// Exibe comentários associados a uma referência bíblica
+    DumpCmt {
+        /// Caminho para um módulo de comentário (.cmt.twm)
+        file: PathBuf,
+        #[arg(long)]
+        book: u8,
+        #[arg(long)]
+        chapter: u16,
+        #[arg(long)]
+        verse: u16,
+        #[arg(long, conflicts_with = "plain")]
+        parsed: bool,
+        #[arg(long)]
+        plain: bool,
+    },
+
+    /// Busca uma entrada de dicionário por chave
+    DumpDct {
+        /// Caminho para um módulo de dicionário (.dct.twm)
+        file: PathBuf,
+        #[arg(long)]
+        key: String,
+        #[arg(long, conflicts_with = "plain")]
+        parsed: bool,
+        #[arg(long)]
+        plain: bool,
+    },
+
     /// Grava amostras distribuídas do conteúdo RTF de um módulo SQLite em pasta temporária
     RtfSample {
         /// Caminho para arquivo de módulo SQLite (.twm)
@@ -79,6 +107,20 @@ fn main() -> Result<()> {
             parsed,
             plain,
         } => dump_verse(&file, book, chapter, verse, parsed, plain),
+        Commands::DumpCmt {
+            file,
+            book,
+            chapter,
+            verse,
+            parsed,
+            plain,
+        } => dump_commentary(&file, book, chapter, verse, parsed, plain),
+        Commands::DumpDct {
+            file,
+            key,
+            parsed,
+            plain,
+        } => dump_dictionary(&file, &key, parsed, plain),
         Commands::RtfSample { file, count } => rtf_sample(&file, count),
     }
 }
@@ -280,6 +322,94 @@ fn dump_verse(
     println!("------------------------------------------------------------");
 
     Ok(())
+}
+
+fn dump_commentary(
+    file: &Path,
+    book_num: u8,
+    chapter: u16,
+    verse_num: u16,
+    parsed: bool,
+    _plain: bool,
+) -> Result<()> {
+    let book = Book::from_number(book_num).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Número de livro inválido: {} (deve estar entre 1 e 66)",
+            book_num
+        )
+    })?;
+    let source = CommentarySource::open(file)?;
+    let entries = source.entries_for(VerseRef::new(book, chapter, verse_num))?;
+    let mut output = format!("{} — {}:{}\n", book.name_pt(), chapter, verse_num);
+    if entries.is_empty() {
+        output.push_str("Nenhum comentário encontrado.\n");
+    }
+    for entry in entries {
+        output.push_str(&format!("Entrada {} ({:?})\n", entry.topic_id, entry.scope));
+        match entry.content {
+            Ok(nodes) if parsed => output.push_str(&format!("{nodes:#?}\n")),
+            Ok(nodes) => output.push_str(&rhema_twformat::plain_text(&nodes)),
+            Err(error) => output.push_str(&format!(
+                "Aviso: conteúdo desta entrada indisponível: {error}\n"
+            )),
+        }
+        output.push('\n');
+    }
+    print_limited(&output);
+    Ok(())
+}
+
+fn dump_dictionary(file: &Path, key: &str, parsed: bool, _plain: bool) -> Result<()> {
+    let source = DictionarySource::open(file)?;
+    let mut output = String::new();
+    match source.lookup(key)? {
+        Some(entry) => {
+            output.push_str(&format!("{} (id {})\n", entry.subject, entry.topic_id));
+            match entry.content {
+                Ok(nodes) if parsed => output.push_str(&format!("{nodes:#?}\n")),
+                Ok(nodes) => output.push_str(&rhema_twformat::plain_text(&nodes)),
+                Err(error) => output.push_str(&format!(
+                    "Aviso: conteúdo desta entrada indisponível: {error}\n"
+                )),
+            }
+        }
+        None => output.push_str("Entrada não encontrada.\n"),
+    }
+    print_limited(&output);
+    Ok(())
+}
+
+fn print_limited(output: &str) {
+    print!("{}", limited_output(output));
+}
+
+fn limited_output(output: &str) -> String {
+    const MAX_CHARS: usize = 1500;
+    const MAX_LINES: usize = 40;
+    const WARNING: &str = "Aviso: saída truncada.\n";
+    let mut result = String::new();
+    let mut truncated = false;
+
+    for (line_count, line) in output.lines().enumerate() {
+        if line_count >= MAX_LINES - 1 {
+            truncated = true;
+            break;
+        }
+        let remaining = MAX_CHARS - WARNING.chars().count() - result.chars().count() - 1;
+        let line_length = line.chars().count();
+        if line_length > remaining {
+            result.extend(line.chars().take(remaining));
+            result.push('\n');
+            truncated = true;
+            break;
+        }
+        result.push_str(line);
+        result.push('\n');
+    }
+    if truncated {
+        result.push_str(WARNING);
+    }
+    result
 }
 
 fn inspect_file(path: &Path) -> Result<()> {
@@ -789,8 +919,25 @@ fn count_markup_tags(
 
 #[cfg(test)]
 mod tests {
-    use super::count_markup_tags;
+    use super::{count_markup_tags, limited_output};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn twm_dump_output_obeys_line_and_character_caps() {
+        let output = (0..100)
+            .map(|line| format!("entry {line}: {}", "x".repeat(80)))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let limited = limited_output(&output);
+        assert!(limited.chars().count() <= 1500);
+        assert!(limited.lines().count() <= 40);
+        assert!(limited.contains("Aviso: saída truncada."));
+
+        let long_line = limited_output(&"x".repeat(2000));
+        assert!(long_line.chars().count() <= 1500);
+        assert!(long_line.lines().count() <= 40);
+        assert!(long_line.contains("Aviso: saída truncada."));
+    }
 
     #[test]
     fn tag_inspection_ignores_text_spans_absorbing_nested_markers() {

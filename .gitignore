@@ -9,6 +9,7 @@ dist/
 *.ot
 *.nt
 *.twm
+!fixtures/*.twm
 *.mybible
 modulos/
 modules/

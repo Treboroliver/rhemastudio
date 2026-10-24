@@ -1,6 +1,6 @@
 # 02 — Formato dos módulos theWord
 
-> **Status do documento:** Especificação refinada nas tarefas **M1.1**, **M1.3b**, **M1.3c** e **M1.3e**, com schemas, RTF, flags de proteção, RVF e códigos gramaticais observados em módulos reais. O apêndice detalhado encontra-se em `docs/02-apendice-schemas.md`.
+> **Status do documento:** Especificação refinada nas tarefas **M1.1**, **M1.3b**, **M1.3c**, **M1.3e** e **M1.4**, com schemas, leitores `.twm` de comentários/dicionários, RTF, flags de proteção, RVF e códigos gramaticais observados em módulos reais. O apêndice detalhado encontra-se em `docs/02-apendice-schemas.md`.
 
 ## 1. Famílias de módulos
 
@@ -95,12 +95,20 @@ O resultado das inspeções é colado em `docs/02-apendice-schemas.md` (um bloco
 - Grupos `fonttbl`, `colortbl`, `stylesheet`, `pict` e o destino `notvatxbx` são ignorados. Campos de link aparecem como `\field`, `\fldinst` e `\fldrslt`; o destino bíblico observado usa `tw://bible.*?id=...|_AUTODETECT_|`. No NICNT há milhares de links bíblicos; não foi encontrado link de dicionário nos três módulos amostrados.
 - Grego e hebraico visíveis no NICNT são representados por `\uN`/`\ucN` e decodificados como Unicode. A amostra release de 2.000 entradas continha 117.089 caracteres gregos e 1.186 hebraicos. Não inferir uma codificação de idioma a partir de `fcharset` sem evidência adicional.
 - No dicionário Mickelson, a configuração declara `compressed=1`, `do.encrypt=1` e `secure=1`. A verificação encontrou BLOBs de alta entropia sem assinaturas padrão, mas isso não identifica o codec nem autoriza decodificação. O leitor deve rejeitar este módulo como protegido antes de consultar `content`; não tentar descompactar ou descriptografar. `data2`, `content_type` NULL e links `tw://` de verbetes seguem sem semântica confirmada.
-- Antes de abrir um `.twm`, a biblioteca deve chamar `ensure_twm_unprotected` e não acessar `content` caso receba `EncryptedModule`. A biblioteca ainda não tem função de abertura `.twm`; a chamada e teste com fixture protegida são requisitos obrigatórios de M1.4.
+- `TwmModule::open` abre SQLite com `SQLITE_OPEN_READ_ONLY`, ativa `PRAGMA query_only=ON`, chama `ensure_twm_unprotected` antes de ler `content`, lê `config` para memória e identifica comentário/dicionário por `config.type`, com extensão como apoio. Arquivo inválido/truncado retorna erro tipado.
 - Nos textos RTF, `\par` e `\line` produzem nós estruturais; formatação conhecida inclui negrito, itálico, sublinhado, tachado, caixa alta e sobrescrito/subscrito. `plain_text` ignora notas/metadados e mantém o comportamento do tokenizador M1.3.
 - `decode_twm_content(content_type, bytes)` despacha somente `"rtf"` para o conversor RTF. `"rvf"` e tipos desconhecidos retornam `ModuleError::UnsupportedContent(tipo)`. O conversor exige cabeçalho RTF e retorna erro tipado para outros bytes em vez de uma árvore vazia silenciosa; grupos RTF malformados com cabeçalho continuam tolerados.
 - A forma de hiperlink para entradas do dicionário não foi confirmada em conteúdo RTF real; `LinkTarget::Dictionary` é aceito pelo conversor, mas permanece sem validação real.
 - VidaNova declara `content.type=rvf` e todas as 110 linhas de `bible_refs.content_type` são `rvf`; o prefixo dos dados é próprio do RVF, não RTF, HTML ou texto simples. A especificação pública genérica RichView RVF foi consultada, mas o perfil exato do theWord não foi confirmado e não há conversor RVF.
 - No verbete G25 de Strong_AMG2, foram observados 46 campos RTF `HYPERLINK`: 39 destinos `tw://` com `id` no formato estrutural `[número].[número].[número]` resolvem para versículos; 7 destinos `id=[número]` ficam como `Other`; nenhum aponta para outro verbete G/H.
+
+### API M1.4 para comentários e dicionários
+
+- `CommentarySource::open` carrega `bible_refs` em memória, ordenado, sem carregar `content`. `entries_for(VerseRef)` valida a referência e devolve `Result<Vec<CommentaryEntry>, ModuleError>`; cada registro contém `topic_id`, `bi`, `ci`, `fvi`, `tvi`, escopo (`Verse`, `Chapter` ou `Book`) e `content: Result<Vec<Node>, ModuleError>`. O conteúdo é lido e convertido apenas para as entradas correspondentes à consulta.
+- A ordem é versículo único, faixas por largura crescente, introdução do capítulo e introdução do livro. O SQL de referência documenta `tvi=0` como limite aberto; o leitor considera esse limite sem fim, embora não tenha ocorrido nos três comentários reais contados. Registros com faixa invertida são ignorados e registrados como aviso, sem interromper a abertura.
+- `DictionarySource::lookup` busca `topics.subject` sem diferenciar caixa; `strong_key(StrongLang, n)` produz `G{n}`/`H{n}`. `prefix_search(prefix, limit)` busca prefixo literal (caracteres `%`, `_` e `\\` escapados); `search_word(word, limit)` usa `topics_wordindex` e retorna `UnsupportedFormat` quando esse índice opcional não existe.
+- O tipo efetivo é o `content_type` da entrada; somente NULL usa `config.content.type`. RVF ou outro tipo não suportado resulta em `UnsupportedContent` no campo `content` daquela entrada, sem descartar as demais. Nenhum payload RVF é decodificado nem representado como árvore vazia.
+- CLI: `rhema-cli dump-cmt <arquivo> --book N --chapter N --verse N [--plain|--parsed]` e `rhema-cli dump-dct <arquivo> --key G25 [--plain|--parsed]`. A saída é limitada a 40 linhas e 1.500 caracteres, com aviso quando truncada.
 
 ## 4. Strong e léxico
 - Bíblia com Strong: tags `<WG…>`/`<WH…>`.
