@@ -1,11 +1,13 @@
 pub mod bible_reader;
 pub mod detect;
 pub mod markup;
+pub mod protection;
 pub mod rtf;
 
 pub use bible_reader::{BibleScope, OntReader};
 pub use detect::{detect_signature, ModuleSignature, SQLITE_MAGIC, TW_ENCRYPTED_MAGIC};
 pub use markup::{plain_text, tokenize_markup};
+pub use protection::ensure_twm_unprotected;
 pub use rtf::{convert_rtf, convert_rtf_with_stats, RtfConversion, RtfStats};
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 # 02 — Formato dos módulos theWord
 
-> **Status do documento:** Especificação refinada nas tarefas **M1.1** e **M1.3b**, com schemas e RTF conferidos em módulos reais. O apêndice detalhado encontra-se em `docs/02-apendice-schemas.md`.
+> **Status do documento:** Especificação refinada nas tarefas **M1.1**, **M1.3b** e **M1.3c**, com schemas, RTF e flags de proteção conferidos em módulos reais. O apêndice detalhado encontra-se em `docs/02-apendice-schemas.md`.
 
 ## 1. Famílias de módulos
 
@@ -11,13 +11,13 @@
 | `.nt` | Somente Novo Testamento | idem | Confirmado (7.957 versículos) |
 | `.cmt.twm` | Comentário (ligado a versículo, faixa, capítulo ou livro) | SQLite; conteúdo RTF em texto | Confirmado em Holman e NICNT |
 | `.gbk.twm` | Livro geral (capítulos/seções) | SQLite | Confirmado (SQLite) |
-| `.dct.twm` | Dicionário / léxico (ex.: Strong) | SQLite; `content.data` pode ser BLOB opaco | Schema confirmado; codec dos BLOBs Mickelson não identificado |
+| `.dct.twm` | Dicionário / léxico (ex.: Strong) | SQLite; `content.data` pode ser BLOB opaco | Mickelson declara compressão e proteção; conteúdo não decodificado |
 | `.dev.twm` | Devocional diário | SQLite | Confirmado (extensão) |
 | `.gbk.twm` híbrido | Livro com ligações a versículos (como comentário) | SQLite | Confirmado (conceito) |
 | `.ontx` / `.twmx` | Módulos Encriptados (DRM) | Binário proprietário (Magic: `TWENCBMOD`) | Não suportado (rejeição com aviso) |
 | Outros `.twm` | Mapas, imagens, etc. | SQLite | Fora do MVP |
 
-Todo `.twm` inspecionado é um **banco SQLite**, mas o tipo e a codificação de `content.data` variam por módulo. Não presuma que todo conteúdo seja RTF. Módulos com sufixo `x` (`.ontx`, `.twmx`) possuem assinatura `TWENCBMOD` e são encriptados por DRM proprietário; são ignorados com aviso amigável. Nunca descriptografar nem tentar contornar proteção.
+Todo `.twm` inspecionado é um **banco SQLite**, mas o tipo e a codificação de `content.data` variam por módulo. Não presuma que todo conteúdo seja RTF. Módulos com sufixo `x` (`.ontx`, `.twmx`) possuem assinatura `TWENCBMOD`; além disso, um `.twm` cuja configuração declare `do.encrypt=1` ou `secure=1` é rejeitado com `ModuleError::EncryptedModule`, antes de consultar `content`. Nunca descriptografar nem tentar contornar proteção.
 
 Locais comuns no Windows: `C:\ProgramData\The Word\` (subpastas de Bíblias e Livros). Permitir ao usuário escolher outras pastas; em Linux/macOS, sempre perguntar a pasta.
 
@@ -90,7 +90,7 @@ O resultado das inspeções é colado em `docs/02-apendice-schemas.md` (um bloco
 - A codificação declarada é `\ansicpg0` (Windows-1252). `\'hh` representa bytes nessa página de códigos; `\uN` contém unidades UTF-16 assinadas e `\ucN` informa quantos caracteres de fallback ignorar.
 - Grupos `fonttbl`, `colortbl`, `stylesheet`, `pict` e o destino `notvatxbx` são ignorados. Campos de link aparecem como `\field`, `\fldinst` e `\fldrslt`; o destino bíblico observado usa `tw://bible.*?id=...|_AUTODETECT_|`. No NICNT há milhares de links bíblicos; não foi encontrado link de dicionário nos três módulos amostrados.
 - Grego e hebraico visíveis no NICNT são representados por `\uN`/`\ucN` e decodificados como Unicode. A amostra release de 2.000 entradas continha 117.089 caracteres gregos e 1.186 hebraicos. Não inferir uma codificação de idioma a partir de `fcharset` sem evidência adicional.
-- Os BLOBs de `Mickelson's Strong.dct.twm` não têm cabeçalho RTF nem formato/compressão identificados; 2.000/2.000 amostras foram classificadas como binárias e ignoradas pelo conversor. Não tentar descompactá-las ou descriptografá-las. O leitor de RVF/esses BLOBs está fora da M1.3b.
+- No dicionário Mickelson, a configuração declara `compressed=1`, `do.encrypt=1` e `secure=1`. A verificação encontrou BLOBs de alta entropia sem assinaturas padrão, mas isso não identifica o codec nem autoriza decodificação. O leitor deve rejeitar este módulo como protegido antes de consultar `content`; não tentar descompactar ou descriptografar. `data2`, `content_type` NULL e links `tw://` de verbetes seguem sem semântica confirmada.
 - Nos textos RTF, `\par` e `\line` produzem nós estruturais; formatação conhecida inclui negrito, itálico, sublinhado, tachado, caixa alta e sobrescrito/subscrito. `plain_text` ignora notas/metadados e mantém o comportamento do tokenizador M1.3.
 - A forma de hiperlink para entradas do dicionário não foi confirmada em conteúdo RTF real; `LinkTarget::Dictionary` é aceito pelo conversor, mas permanece sem validação real.
 

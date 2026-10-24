@@ -162,7 +162,43 @@ Os comentários são RTF textual sem compressão observada. Nos 2.000 registros 
 
 Campos de hiperlink aparecem como grupos `\field` com destinos `\fldinst` e resultado visível `\fldrslt`. O fragmento de destino bíblico observado foi `tw://bible.*?id=...|_AUTODETECT_|`. Na amostra release, o conversor identificou 2.164 links bíblicos e reteve 25 destinos `tw://` não classificados em Holman; no NICNT identificou 59.658 links bíblicos e reteve 1.239 destinos `tw://` não classificados. Nenhum link de dicionário foi identificado nesses comentários. Não foi confirmada uma marcação real de link para entrada de dicionário.
 
-Os BLOBs Mickelson não foram tratados como RTF: as 2.000 entradas da amostra foram classificadas como binárias pelo conversor e retornaram árvore vazia. Não foi identificado cabeçalho de compressão conhecido nem codec; isso não prova ausência de compressão e não autoriza tentativa de descriptografia ou contorno de proteção. A codificação/formato interno permanece aberto para investigação separada, fora da M1.3b.
+Os BLOBs Mickelson não foram tratados como RTF: as 2.000 entradas da amostra foram classificadas como binárias pelo conversor e retornaram árvore vazia. A investigação posterior M1.3c encontrou configuração explícita de proteção; portanto, nenhuma rotina de decodificação pode ser aplicada a esses dados. Consulte a seção seguinte.
+
+### 2.4 Investigação de proteção do dicionário Mickelson (M1.3c)
+
+A inspeção da tabela `config` do Mickelson registrou estas propriedades relevantes:
+
+| Chave | Valor observado | Interpretação limitada à evidência |
+|---|---|---|
+| `schema.version` | `1` | Versão de schema |
+| `type` | `1` | Tipo declarado pelo módulo |
+| `lang` | `eng` | Idioma declarado |
+| `compressed` | `1` | O módulo declara conteúdo comprimido; algoritmo não identificado |
+| `compressed.search.data` | `1` | O módulo declara `content_search.data` comprimido |
+| `do.encrypt` | `1` | Indicação explícita de encriptação |
+| `secure` | `1` | Indicação explícita de proteção |
+| `strong`, `strong.g`, `strong.h` | `1` | Indicadores de conteúdo/índice Strong |
+| `lemma.g`, `lemma.h` | `1` | Indicadores de lema |
+
+Também há chaves de versão de índices e metadados editoriais. Valores de campos editoriais longos (incluindo `about` e descrição) não são reproduzidos. A comparação com Holman-AT confirmou `schema.version=1`, `type=2` e `config.content.type=rtf`; não foram observadas ali as flags `do.encrypt` ou `secure`.
+
+Como a configuração declara simultaneamente encriptação e proteção, a investigação dos payloads foi encerrada sem descompressão, decodificação ou tentativa de contorno. Os seguintes dados estruturais já obtidos foram calculados sobre bytes/tipos e não envolvem interpretação do conteúdo:
+
+| Medida Mickelson | Resultado |
+|---|---:|
+| `content.data` | 14.300 valores BLOB; mínimo 252, mediana 361, máximo 4.151 bytes |
+| Entropia média de `content.data` | 7,414654 bits/byte |
+| `content.data2` | NULL em 14.300/14.300; finalidade desconhecida |
+| `content_search.data` | 14.300 BLOBs; mínimo 132, mediana 257, máximo 2.175 bytes |
+| Entropia média de `content_search.data` | 7,189163 bits/byte |
+| `topics_wordindex` | 57.541 linhas; coluna `word` armazenada como texto legível, sem os valores reproduzidos |
+| `topics.content_type` | NULL em 14.299 linhas; `rvf` em 1; significado do NULL desconhecido |
+
+Os oito prefixos de oito bytes mais frequentes de `content.data` foram `C5 7D F8 CB 5B D7 75 8E` (14), `69 40 DF C9 19 31 62 B4` (9), `10 6E 81 11 1C C5 33 37` (9), `4F 0B D9 D6 4A A9 17 B9` (9), `C6 11 6D BB CC FD D5 B6` (8), `C2 4B 3B 47 58 50 6D AE` (8), `F6 89 A5 09 2F 05 6A 9E` (8) e `78 AC 49 79 39 AF 81 80` (8).
+
+Não houve correspondência nos bytes verificados para assinaturas comuns de zlib, gzip, bzip2, xz/LZMA, zstd, BOM UTF-16 ou `TWENCBMOD`, nem classificação como ASCII/UTF-8 válido ou RTF. A ausência de assinatura não contradiz `compressed=1` e não identifica o codec. Não é possível concluir a codificação, algoritmo, significado de `data2`, semântica de `content_type` NULL ou a estrutura dos links `tw://` para verbetes. Esses pontos não serão investigados por decodificação deste módulo protegido.
+
+O leitor preventivo `ensure_twm_unprotected` abre SQLite com `SQLITE_OPEN_READ_ONLY` e retorna `ModuleError::EncryptedModule` quando `config` contém `do.encrypt=1` ou `secure=1`. A verificação não consulta `content`. Não se implementou decodificador para esse dicionário. Nenhum texto de módulo foi copiado para esta documentação.
 
 #### Contagens de palavras de controle nos comentários
 

@@ -1,5 +1,13 @@
 # Changelog — RhemaStudio
 
+## [M1.3c] — 2026-10-24
+
+### Concluído
+- Investigação somente leitura do dicionário Mickelson encontrou `compressed=1`, `do.encrypt=1` e `secure=1`; essa evidência encerrou a análise sem decodificar nem descomprimir qualquer payload.
+- Registrados no apêndice os indicadores de configuração conhecidos, tipos/tamanhos/entropia, prefixos de bytes e pontos ainda sem resposta, sem reproduzir texto de módulo.
+- Adicionado `ensure_twm_unprotected`, que abre SQLite estritamente em leitura e rejeita flags observadas de proteção com `ModuleError::EncryptedModule` antes de consultas de conteúdo; o comando `inspect` e a amostragem RTF passam pela verificação.
+- Não foi implementado leitor/decodificador para o Mickelson. Algoritmo de compressão, dados auxiliares e destinos `tw://` permanecem sem esclarecimento; não foi iniciado M1.4.
+
 ## [M1.3b] — 2026-10-24
 
 ### Concluído

@@ -91,6 +91,7 @@ fn rtf_sample(path: &Path, count: usize) -> Result<()> {
     if !path.exists() {
         bail!("Arquivo não encontrado: {}", path.display());
     }
+    rhema_twformat::ensure_twm_unprotected(path)?;
     let conn = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -328,6 +329,7 @@ fn inspect_file(path: &Path) -> Result<()> {
 fn inspect_sqlite(path: &Path) -> Result<()> {
     println!("Formato detectado: SQLite (banco de dados)");
     println!("Abrindo em modo estritamente SOMENTE LEITURA...\n");
+    rhema_twformat::ensure_twm_unprotected(path)?;
 
     let conn = Connection::open_with_flags(
         path,

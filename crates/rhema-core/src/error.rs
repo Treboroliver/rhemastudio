@@ -32,7 +32,7 @@ pub enum CanonError {
 
 #[derive(Debug, Error, Clone)]
 pub enum ModuleError {
-    #[error("Módulo encriptado ou protegido por DRM do theWord (assinatura TWENCBMOD). O RhemaStudio não remove proteção de arquivos proprietários.")]
+    #[error("Módulo encriptado ou protegido. O RhemaStudio não remove proteção de arquivos proprietários.")]
     EncryptedModule,
 
     #[error("Módulo não encontrado: {0}")]
