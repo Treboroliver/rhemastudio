@@ -11,7 +11,7 @@ pub use canon::{
     NEW_TESTAMENT_VERSES, OLD_TESTAMENT_VERSES, TOTAL_CANONICAL_BOOKS, TOTAL_CANONICAL_CHAPTERS,
     TOTAL_CANONICAL_VERSES,
 };
-pub use error::CanonError;
+pub use error::{CanonError, ModuleError};
 pub use module_info::{ModuleInfo, ModuleKind};
 pub use node::{Node, StrongLang};
 pub use verse_range::VerseRange;

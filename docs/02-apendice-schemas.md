@@ -190,6 +190,17 @@ Tanto comentários quanto dicionários e livros utilizam a tabela `config(name t
 | `<i>...</i>` | Tag HTML de itálico (legado em certas notas) | `Node::Italic(Vec<Node>)` |
 | `<TS>...<Ts>` | Título de Seção | `Node::Heading(u8, Vec<Node>)` |
 
+### 4.3 A Propriedade `verse.rule` (Regras de Hiperlink do theWord)
+
+No bloco de propriedades de Bíblias como a `kjv.ont`, encontra-se frequentemente a chave `verse.rule`:
+```ini
+verse.rule = "<wt>(.*?)(<W([HG]\d+)>)(<W([HG]\d+)>)?(<W([HG]\d+)>)?" "<wt><a href=_STRONG_$3|_STRONG2_$5|_STRONG3_$7|_NOLINK_>$1</a>$2$4$6"
+```
+
+**O que significa:**
+1. **Mecanismo original do theWord:** Consiste em um par de strings (expressão regular de captura + string de substituição). No motor de visualização do theWord (baseado em controle de rich text/HTML), essa regra era aplicada para envelopar automaticamente as palavras anteriores aos números de Strong com hiperlinks internos (ex.: `_STRONG_G25`), permitindo que o clique na palavra ou no número abrisse o popup do dicionário correspondente.
+2. **Abordagem do RhemaStudio:** O RhemaStudio **não executa substituições de regex em strings para produzir HTML**. Em vez disso, nosso tokenizador (M1.3) analisa as tags tipadas nativamente, transformando-as diretamente em nós da árvore `Vec<Node>` (`Node::Strong { lang, num, children }`). A propriedade `verse.rule` é parseada e preservada em `ModuleInfo.props` para fidelidade aos metadados do módulo original.
+
 ---
 
 ## 5. Módulos Encriptados / Protegidos por DRM (`.ontx`, `.twmx`)

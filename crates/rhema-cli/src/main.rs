@@ -8,6 +8,9 @@ use clap::{Parser, Subcommand};
 use regex::Regex;
 use rusqlite::{Connection, OpenFlags};
 
+use rhema_core::Book;
+use rhema_twformat::OntReader;
+
 #[derive(Parser)]
 #[command(
     name = "rhema-cli",
@@ -25,6 +28,24 @@ enum Commands {
         /// Caminho para o arquivo (.twm, .ont, .ot, .nt, etc.)
         file: PathBuf,
     },
+
+    /// Exibe o texto bruto de um versículo a partir de um módulo bíblico (.ont/.ot/.nt)
+    Dump {
+        /// Caminho para o arquivo (.ont, .ot, .nt)
+        file: PathBuf,
+
+        /// Número do livro canônico (1 a 66; ex: 43 para João)
+        #[arg(long)]
+        book: u8,
+
+        /// Número do capítulo
+        #[arg(long)]
+        chapter: u16,
+
+        /// Número do versículo
+        #[arg(long)]
+        verse: u16,
+    },
 }
 
 fn main() -> Result<()> {
@@ -32,7 +53,44 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Inspect { file } => inspect_file(&file),
+        Commands::Dump {
+            file,
+            book,
+            chapter,
+            verse,
+        } => dump_verse(&file, book, chapter, verse),
     }
+}
+
+fn dump_verse(file: &Path, book_num: u8, chapter: u16, verse_num: u16) -> Result<()> {
+    let book = Book::from_number(book_num).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Número de livro inválido: {} (deve estar entre 1 e 66)",
+            book_num
+        )
+    })?;
+
+    let reader = OntReader::open(file)?;
+    println!("Módulo: {} ({})", reader.info().title, file.display());
+    println!(
+        "Referência: {} (Livro #{}) {}:{}",
+        book.name_pt(),
+        book_num,
+        chapter,
+        verse_num
+    );
+    println!("Codificação: {}", reader.encoding_name());
+    println!("Versículos no módulo: {}", reader.verse_count());
+    if reader.is_degraded() {
+        println!("Aviso: Módulo operando em modo degradado");
+    }
+
+    let text = reader.verse(book, chapter, verse_num)?;
+    println!("------------------------------------------------------------");
+    println!("{}", text);
+    println!("------------------------------------------------------------");
+
+    Ok(())
 }
 
 fn inspect_file(path: &Path) -> Result<()> {

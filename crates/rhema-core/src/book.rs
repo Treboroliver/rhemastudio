@@ -187,8 +187,22 @@ impl Book {
         canon::book_meta(self).abbr_pt
     }
 
+    pub fn primary_abbreviation_pt(self) -> &'static str {
+        self.abbreviations_pt()
+            .first()
+            .copied()
+            .unwrap_or_else(|| self.name_pt())
+    }
+
     pub const fn abbreviations_en(self) -> &'static [&'static str] {
         canon::book_meta(self).abbr_en
+    }
+
+    pub fn primary_abbreviation_en(self) -> &'static str {
+        self.abbreviations_en()
+            .first()
+            .copied()
+            .unwrap_or_else(|| self.name_en())
     }
 
     #[inline]

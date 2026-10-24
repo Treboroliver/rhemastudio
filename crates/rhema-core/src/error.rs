@@ -29,3 +29,27 @@ pub enum CanonError {
     #[error("Faixa de versículos inválida: início {start} posterior ao fim {end}")]
     InvalidRange { start: VerseRef, end: VerseRef },
 }
+
+#[derive(Debug, Error, Clone)]
+pub enum ModuleError {
+    #[error("Módulo encriptado ou protegido por DRM do theWord (assinatura TWENCBMOD). O RhemaStudio não remove proteção de arquivos proprietários.")]
+    EncryptedModule,
+
+    #[error("Módulo não encontrado: {0}")]
+    NotFound(String),
+
+    #[error("Arquivo inválido ou corrompido: {0}")]
+    Corrupted(String),
+
+    #[error("Versículo {0} não encontrado no módulo")]
+    VerseNotFound(VerseRef),
+
+    #[error("Livro {0:?} não está presente no módulo (escopo: {1})")]
+    BookNotInModule(Book, String),
+
+    #[error("Formato de módulo não suportado: {0}")]
+    UnsupportedFormat(String),
+
+    #[error("Erro de E/S ao ler módulo: {0}")]
+    Io(String),
+}

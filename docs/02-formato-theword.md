@@ -28,7 +28,7 @@ Locais comuns no Windows: `C:\ProgramData\The Word\` (subpastas de Bíblias e Li
 - Após o último versículo, bloco de **propriedades** `chave=valor` (título, descrição, abreviação, data de versão, idioma, etc.).
 - Contagem esperada de linhas de versículos (Confirmado no `kjv.ont`): `.ot` = 23.145 · `.nt` = 7.957 · `.ont` = 31.102.
 - O primeiro versículo do `.nt` é Mateus 1:1; do `.ot`/`.ont`, Gênesis 1:1.
-- Codificação: tentar UTF-8 (com/sem BOM); se inválido, consultar propriedade de `charset` (`0` = ANSI Windows-1252, `65001` = UTF-8) e, em último caso, Windows-1252. Confirmado no `kjv.ont` (`charset=0`).
+- Codificação: a codificação segue estritamente a propriedade `charset` do módulo (`0` = ANSI Windows-1252, `65001` = UTF-8, etc.); **UTF-8 não pode ser presumido** (o theWord tem raízes em Windows/Delphi e usa Windows-1252 como padrão histórico). Se a propriedade `charset` for desconhecida ou ausente: tentar UTF-8, depois Windows-1252 como fallback, e registrar um aviso no log. Confirmado no `kjv.ont` (`charset=0`).
 
 ### 2.2 Mapeamento linha → referência
 Usar tabela canônica de versículos por capítulo (versificação padrão protestante, 66 livros). A tabela vive em `rhema-core` como dado estático e é validada por teste: soma = 31.102.

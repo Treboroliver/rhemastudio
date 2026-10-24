@@ -26,7 +26,7 @@ Mockups de referência visual: protótipo HTML original do autor + canvas "Rhema
 3. **Não presuma o que não foi verificado.** Itens marcados `[VERIFICAR]` em `docs/02` devem ser confirmados contra módulos reais antes de virar código definitivo (ver tarefa M1.1). Se o schema real divergir do documento, **o schema real vence** — atualize o documento.
 4. **Offline-first.** Nenhuma chamada de rede por padrão. Atualizações e downloads só com ação explícita do usuário.
 5. **Nunca perder o trabalho do pastor.** Sermões são salvos continuamente (autosave a cada alteração, debounce 500 ms) e gravados de forma atômica (arquivo temporário + rename).
-6. **Direitos autorais.** Não embuta módulos protegidos. Só distribua módulos cuja licença permita redistribuição (verifique cada um). Testes usam **fixtures sintéticas** geradas por script.
+6. **Direitos autorais.** Não embuta módulos protegidos. Só distribua módulos cuja licença permita redistribuição (verifique cada um). Testes usam **fixtures sintéticas** geradas por script. Nunca tente descriptografar ou contornar proteção de módulos (`.ontx` e similares). Detecte pela assinatura, retorne o erro `EncryptedModule` e mostre uma mensagem amigável.
 7. **Português do Brasil primeiro.** Todas as strings da interface ficam em arquivos de i18n (`pt-BR` padrão, `en` secundário). Abreviações de livros em português (`Jo`, `1Co`, `Sl`) e inglês.
 8. **Teclado primeiro, mouse também.** Toda ação importante tem atalho; todo elemento interativo é focável e tem rótulo acessível.
 9. **Orçamentos de performance** (seção 6 de `docs/03`) são requisito, não meta. CI falha se estourar.

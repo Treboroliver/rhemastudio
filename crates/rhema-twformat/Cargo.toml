@@ -1,6 +1,17 @@
 [package]
 name = "rhema-twformat"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+rhema-core = { path = "../rhema-core" }
+memmap2 = "0.9"
+encoding_rs = "0.8"
+thiserror = "2.0"
+tracing = "0.1"
+memchr = "2.7"
+
+[dev-dependencies]
+proptest = "1.6"
+tempfile = "3.17"
+gen-fixtures = { path = "../../tools/gen-fixtures" }
