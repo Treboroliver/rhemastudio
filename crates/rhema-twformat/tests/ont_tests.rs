@@ -216,6 +216,146 @@ fn test_tokenize_all_real_kjv_verses_when_configured() {
     assert_eq!(unknown_count, 0);
 }
 
+#[test]
+fn test_inspect_and_tokenize_ara_plus_when_configured() {
+    let Ok(test_dir) = std::env::var("RHEMA_TEST_MODULES") else {
+        return;
+    };
+    let path = PathBuf::from(test_dir).join("ARA+.ont");
+    if !path.exists() {
+        return;
+    }
+
+    let reader = OntReader::open(&path).expect("Falha ao abrir ARA+.ont");
+    let mut tag_counts = BTreeMap::<String, usize>::new();
+    let mut examples = BTreeMap::<&str, Vec<String>>::new();
+    let mut unknown_names = BTreeMap::<String, usize>::new();
+    let mut unknown_count = 0usize;
+    let started = Instant::now();
+
+    for index in 0..reader.verse_count() {
+        let raw = reader
+            .line_by_index(index)
+            .expect("Falha ao ler linha de ARA+.ont");
+        let mut cursor = 0usize;
+        while let Some(start_offset) = raw[cursor..].find('<') {
+            let start = cursor + start_offset;
+            let Some(end_offset) = raw[start..].find('>') else {
+                break;
+            };
+            let end = start + end_offset;
+            let tag = &raw[start..=end];
+            let tag_body = tag
+                .strip_prefix('<')
+                .and_then(|value| value.strip_suffix('>'))
+                .unwrap_or_default();
+            let tag_name = tag_body.strip_prefix('/').unwrap_or(tag_body);
+            let is_structural_tag = !tag_name.is_empty()
+                && tag_name
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || character == '_');
+            if is_structural_tag {
+                *tag_counts.entry(tag.to_string()).or_default() += 1;
+            }
+            let category = if tag.starts_with("<TS") || tag.starts_with("</Ts") {
+                Some("TS")
+            } else if tag == "<CL>" {
+                Some("CL")
+            } else if tag.starts_with("<WT") {
+                Some("WT")
+            } else if tag.starts_with("<RX") {
+                Some("RX")
+            } else {
+                None
+            };
+            if is_structural_tag {
+                if let Some(category) = category {
+                    let items = examples.entry(category).or_default();
+                    if items.len() < 3 {
+                        items.push(match category {
+                            "TS" if tag.starts_with("</") => "</Ts…>".to_string(),
+                            "TS" => "<TS…>".to_string(),
+                            "CL" => "<CL>".to_string(),
+                            "WT" => "<WT…>".to_string(),
+                            "RX" => "<RX…>".to_string(),
+                            _ => unreachable!(),
+                        });
+                    }
+                }
+            }
+            cursor = end + 1;
+        }
+        let nodes = tokenize_markup(&raw);
+        unknown_count += count_unknown_tags(&nodes);
+        collect_unknown_tag_names(&nodes, &mut unknown_names);
+    }
+    let elapsed = started.elapsed();
+    let mut unknown_families = BTreeMap::<String, (usize, usize)>::new();
+    for (name, count) in &unknown_names {
+        let family = if name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
+        {
+            summarize_markup_tag(&format!("<{name}>"))
+        } else {
+            "<conteúdo/marcação misturados>".to_string()
+        };
+        let stats = unknown_families.entry(family).or_default();
+        stats.0 += count;
+        stats.1 += 1;
+    }
+    let mut tag_families = BTreeMap::<String, (usize, usize)>::new();
+    for (tag, count) in &tag_counts {
+        let family = summarize_markup_tag(tag);
+        let stats = tag_families.entry(family).or_default();
+        stats.0 += count;
+        stats.1 += 1;
+    }
+    let property_keys = reader.properties().keys().cloned().collect::<Vec<_>>();
+
+    eprintln!(
+        "ARA+ versículos={}; charset={:?}; título={:?}; idioma={:?}; propriedades (chaves)={property_keys:?}",
+        reader.verse_count(),
+        reader.properties().get("charset"),
+        reader.properties().get("short.title"),
+        reader.properties().get("lang")
+    );
+    eprintln!(
+        "ARA+ marcadores válidos distintos={}; ocorrências/distintos por família={tag_families:?}",
+        tag_counts.len()
+    );
+    eprintln!("ARA+ tags antes [VERIFICAR]={examples:?}");
+    eprintln!(
+        "ARA+ UnknownTag={unknown_count}; ocorrências/distintos por tipo seguro={unknown_families:?}; tempo={elapsed:?}"
+    );
+}
+
+fn summarize_markup_tag(tag: &str) -> String {
+    let body = tag
+        .strip_prefix('<')
+        .and_then(|value| value.strip_suffix('>'))
+        .unwrap_or(tag);
+    let body = body.strip_prefix('/').unwrap_or(body);
+    for prefix in ["XWG", "WG", "WH", "G", "H"] {
+        if let Some(suffix) = body.strip_prefix(prefix) {
+            let numeric = suffix.strip_suffix('x').unwrap_or(suffix);
+            if !numeric.is_empty() && numeric.chars().all(|character| character.is_ascii_digit()) {
+                return format!("<{prefix}…>");
+            }
+        }
+    }
+    if body.starts_with("TS") || body.starts_with("Ts") {
+        return "<TS…>".to_string();
+    }
+    if body.starts_with("WT") {
+        return "<WT…>".to_string();
+    }
+    if body.starts_with("RX") {
+        return "<RX…>".to_string();
+    }
+    tag.to_string()
+}
+
 fn collect_unknown_tag_names(nodes: &[rhema_core::Node], names: &mut BTreeMap<String, usize>) {
     for node in nodes {
         match node {
@@ -224,11 +364,18 @@ fn collect_unknown_tag_names(nodes: &[rhema_core::Node], names: &mut BTreeMap<St
                 collect_unknown_tag_names(children, names);
             }
             rhema_core::Node::Italic(children)
+            | rhema_core::Node::Bold(children)
+            | rhema_core::Node::Underline(children)
+            | rhema_core::Node::Strikethrough(children)
+            | rhema_core::Node::Caps(children)
+            | rhema_core::Node::Superscript(children)
+            | rhema_core::Node::Subscript(children)
             | rhema_core::Node::WordsOfJesus(children)
             | rhema_core::Node::OtQuote(children)
             | rhema_core::Node::Heading(_, children)
             | rhema_core::Node::Strong { children, .. }
-            | rhema_core::Node::Note(children) => collect_unknown_tag_names(children, names),
+            | rhema_core::Node::Note(children)
+            | rhema_core::Node::Link { children, .. } => collect_unknown_tag_names(children, names),
             _ => {}
         }
     }
@@ -240,11 +387,18 @@ fn count_unknown_tags(nodes: &[rhema_core::Node]) -> usize {
         .map(|node| match node {
             rhema_core::Node::UnknownTag { children, .. } => 1 + count_unknown_tags(children),
             rhema_core::Node::Italic(children)
+            | rhema_core::Node::Bold(children)
+            | rhema_core::Node::Underline(children)
+            | rhema_core::Node::Strikethrough(children)
+            | rhema_core::Node::Caps(children)
+            | rhema_core::Node::Superscript(children)
+            | rhema_core::Node::Subscript(children)
             | rhema_core::Node::WordsOfJesus(children)
             | rhema_core::Node::OtQuote(children)
             | rhema_core::Node::Heading(_, children)
             | rhema_core::Node::Strong { children, .. }
-            | rhema_core::Node::Note(children) => count_unknown_tags(children),
+            | rhema_core::Node::Note(children)
+            | rhema_core::Node::Link { children, .. } => count_unknown_tags(children),
             _ => 0,
         })
         .sum()

@@ -795,6 +795,8 @@ mod tests {
             "Mickelson's Strong.dct.twm",
             "Holman-AT.cmt.twm",
             "NICNT.cmt.twm",
+            "VidaNova.cmt.twm",
+            "Strong_AMG2.dct.twm",
         ];
         for filename in modules {
             let path = Path::new(&root).join(filename);
@@ -803,6 +805,14 @@ mod tests {
                 "Módulo de teste ausente: {}",
                 path.display()
             );
+            match crate::ensure_twm_unprotected(&path) {
+                Ok(()) => {}
+                Err(rhema_core::ModuleError::EncryptedModule) => {
+                    eprintln!("{filename}: protegido; conteúdo não consultado");
+                    continue;
+                }
+                Err(error) => panic!("Falha na verificação de proteção de {filename}: {error}"),
+            }
             let connection = Connection::open_with_flags(
                 &path,
                 OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -812,17 +822,18 @@ mod tests {
                 .query_row("SELECT count(*) FROM content", [], |row| row.get(0))
                 .expect("contar conteúdo");
             let sample_count = count.min(2_000);
-            assert_eq!(
-                sample_count, 2_000,
-                "{filename} precisa de pelo menos 2.000 linhas"
-            );
+            assert!(sample_count > 0, "{filename} não contém entradas");
             let mut query = connection
                 .prepare("SELECT data FROM content ORDER BY topic_id")
                 .expect("preparar amostragem distribuída");
             let mut rows = query.query([]).expect("abrir cursor de amostragem");
-            let sample_offsets = (0..sample_count)
-                .map(|sample_index| sample_index * (count - 1) / (sample_count - 1))
-                .collect::<Vec<_>>();
+            let sample_offsets = if sample_count == 1 {
+                vec![0]
+            } else {
+                (0..sample_count)
+                    .map(|sample_index| sample_index * (count - 1) / (sample_count - 1))
+                    .collect::<Vec<_>>()
+            };
             let mut next_sample = 0usize;
             let mut control_words = BTreeMap::<String, usize>::new();
             let mut unknown_controls = BTreeMap::<String, usize>::new();
@@ -836,7 +847,12 @@ mod tests {
             let mut greek_characters = 0usize;
             let mut hebrew_characters = 0usize;
             let mut link_targets = BTreeMap::<String, usize>::new();
-            let started = Instant::now();
+            let mut storage_classes = BTreeMap::<String, usize>::new();
+            let mut rtf_entries = 0usize;
+            let mut conversion_duration = std::time::Duration::ZERO;
+            let mut accent_characters = 0usize;
+            let mut replacement_characters = 0usize;
+            let mut residual_controls = Vec::<Vec<String>>::new();
 
             let mut row_index = 0usize;
             while let Some(row) = rows.next().expect("avançar cursor de amostragem") {
@@ -845,12 +861,33 @@ mod tests {
                     continue;
                 }
                 let raw = match row.get_ref(0).expect("ler conteúdo") {
-                    ValueRef::Text(bytes) | ValueRef::Blob(bytes) => bytes.to_vec(),
-                    ValueRef::Null => Vec::new(),
-                    ValueRef::Integer(value) => value.to_string().into_bytes(),
-                    ValueRef::Real(value) => value.to_string().into_bytes(),
+                    ValueRef::Text(bytes) => {
+                        *storage_classes.entry("TEXT".to_string()).or_default() += 1;
+                        bytes.to_vec()
+                    }
+                    ValueRef::Blob(bytes) => {
+                        *storage_classes.entry("BLOB".to_string()).or_default() += 1;
+                        bytes.to_vec()
+                    }
+                    ValueRef::Null => {
+                        *storage_classes.entry("NULL".to_string()).or_default() += 1;
+                        Vec::new()
+                    }
+                    ValueRef::Integer(value) => {
+                        *storage_classes.entry("INTEGER".to_string()).or_default() += 1;
+                        value.to_string().into_bytes()
+                    }
+                    ValueRef::Real(value) => {
+                        *storage_classes.entry("REAL".to_string()).or_default() += 1;
+                        value.to_string().into_bytes()
+                    }
                 };
+                if raw.starts_with(b"{\\rtf") {
+                    rtf_entries += 1;
+                }
+                let conversion_started = Instant::now();
                 let converted = convert_rtf_with_stats(&raw);
+                conversion_duration += conversion_started.elapsed();
                 if converted.stats.binary_input {
                     binary_entries += 1;
                 }
@@ -862,6 +899,25 @@ mod tests {
                     converted.stats.unknown_destinations,
                 );
                 let text = plain_text(&converted.nodes);
+                accent_characters += text
+                    .chars()
+                    .filter(|character| matches!(*character as u32, 0x00c0..=0x00ff))
+                    .count();
+                replacement_characters += text
+                    .chars()
+                    .filter(|character| *character == '\u{fffd}')
+                    .count();
+                if filename == "NICNT.cmt.twm" && text.contains(['\\', '{', '}']) {
+                    residual_controls.push(
+                        [b"\\\\".as_slice(), b"\\{", b"\\}"]
+                            .into_iter()
+                            .filter(|escape| {
+                                raw.windows(escape.len()).any(|window| window == *escape)
+                            })
+                            .map(|escape| String::from_utf8_lossy(escape).into_owned())
+                            .collect(),
+                    );
+                }
                 contains_backslash += usize::from(text.contains('\\'));
                 contains_brace += usize::from(text.contains('{') || text.contains('}'));
                 escaped_backslashes += raw.windows(2).filter(|pair| *pair == b"\\\\").count();
@@ -887,11 +943,99 @@ mod tests {
                 next_sample, sample_count,
                 "amostragem incompleta de {filename}"
             );
-            let elapsed = started.elapsed();
             eprintln!(
-                "{filename}: {sample_count} entradas; binárias={binary_entries}; desconhecidos={unknown_controls:?}; destinos={destinations:?}; destinos desconhecidos={unknown_destinations:?}; texto com barra invertida={contains_backslash} (escapes={escaped_backslashes}); texto com chaves={contains_brace} (escapes={escaped_braces}); grego={greek_characters}; hebraico={hebrew_characters}; links={link_targets:?}; média={:.3} ms/entrada; controles={control_words:?}",
-                elapsed.as_secs_f64() * 1_000.0 / sample_count as f64
+                "{filename}: {sample_count} entradas; storage={storage_classes:?}; RTF={rtf_entries}; não RTF={}; binárias={binary_entries}; desconhecidos={unknown_controls:?}; destinos={destinations:?}; destinos desconhecidos={unknown_destinations:?}; texto com barra invertida={contains_backslash} (escapes={escaped_backslashes}); texto com chaves={contains_brace} (escapes={escaped_braces}); grego={greek_characters}; hebraico={hebrew_characters}; links={link_targets:?}; acentos={accent_characters}; U+FFFD={replacement_characters}; média conversão={:.3} ms/entrada; controles={control_words:?}",
+                sample_count - rtf_entries,
+                conversion_duration.as_secs_f64() * 1_000.0 / sample_count as f64
             );
+            if filename == "NICNT.cmt.twm" {
+                eprintln!(
+                    "NICNT fragmentos estruturais residuais (sem texto): {residual_controls:?}"
+                );
+            }
+            if filename == "VidaNova.cmt.twm" {
+                eprintln!("VidaNova acentuação observada: {}; exemplo estrutural: Text(U+00E7/U+00E3); links bíblicos={}", accent_characters > 0 && replacement_characters == 0, link_targets.get("bíblia").copied().unwrap_or_default());
+            }
+            if filename == "Strong_AMG2.dct.twm" {
+                print_strong_g25_shape(&connection);
+            }
+        }
+    }
+
+    fn print_strong_g25_shape(connection: &rusqlite::Connection) {
+        use rusqlite::types::ValueRef;
+        let columns = connection
+            .prepare("PRAGMA table_info(topics)")
+            .and_then(|mut statement| {
+                statement
+                    .query_map([], |row| row.get::<_, String>(1))?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .expect("ler nomes das colunas sintéticas/reais de topics");
+        let Some(key_column) = ["subject", "key", "word"].into_iter().find(|candidate| {
+            columns
+                .iter()
+                .any(|column| column.eq_ignore_ascii_case(candidate))
+        }) else {
+            eprintln!("Strong_AMG2: nenhuma coluna de chave conhecida em topics");
+            return;
+        };
+        let query = format!(
+            "SELECT c.data FROM topics t JOIN content c ON c.topic_id=t.id WHERE t.\"{key_column}\"=?1 LIMIT 1"
+        );
+        let result = connection.query_row(&query, ["G25"], |row| {
+            let raw = match row.get_ref(0)? {
+                ValueRef::Text(bytes) | ValueRef::Blob(bytes) => bytes.to_vec(),
+                ValueRef::Null => Vec::new(),
+                ValueRef::Integer(value) => value.to_string().into_bytes(),
+                ValueRef::Real(value) => value.to_string().into_bytes(),
+            };
+            Ok(raw)
+        });
+        match result {
+            Ok(raw) => {
+                let nodes = convert_rtf(&raw);
+                let mut shape = BTreeMap::new();
+                collect_node_shapes(&nodes, &mut shape);
+                eprintln!(
+                    "Strong_AMG2 G25: existe; coluna-chave={key_column}; conteúdo convertido={}; árvore={shape:?}",
+                    !nodes.is_empty()
+                );
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                eprintln!("Strong_AMG2 G25: inexistente; coluna-chave={key_column}");
+            }
+            Err(error) => panic!("Falha ao verificar G25 em Strong_AMG2: {error}"),
+        }
+    }
+
+    fn collect_node_shapes(nodes: &[Node], counts: &mut BTreeMap<&'static str, usize>) {
+        for node in nodes {
+            let (name, children) = match node {
+                Node::Text(_) => ("Text", None),
+                Node::Italic(nodes) => ("Italic", Some(nodes)),
+                Node::Bold(nodes) => ("Bold", Some(nodes)),
+                Node::Underline(nodes) => ("Underline", Some(nodes)),
+                Node::Strikethrough(nodes) => ("Strikethrough", Some(nodes)),
+                Node::Caps(nodes) => ("Caps", Some(nodes)),
+                Node::Superscript(nodes) => ("Superscript", Some(nodes)),
+                Node::Subscript(nodes) => ("Subscript", Some(nodes)),
+                Node::WordsOfJesus(nodes) => ("WordsOfJesus", Some(nodes)),
+                Node::OtQuote(nodes) => ("OtQuote", Some(nodes)),
+                Node::Heading(_, nodes) => ("Heading", Some(nodes)),
+                Node::Strong { children, .. } => ("Strong", Some(children)),
+                Node::Morph(_) => ("Morph", None),
+                Node::Note(nodes) => ("Note", Some(nodes)),
+                Node::XRef(_) => ("XRef", None),
+                Node::Link { children, .. } => ("Link", Some(children)),
+                Node::Paragraph => ("Paragraph", None),
+                Node::LineBreak => ("LineBreak", None),
+                Node::UnknownTag { children, .. } => ("UnknownTag", Some(children)),
+            };
+            *counts.entry(name).or_default() += 1;
+            if let Some(children) = children {
+                collect_node_shapes(children, counts);
+            }
         }
     }
 

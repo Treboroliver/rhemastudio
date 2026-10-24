@@ -63,7 +63,7 @@ Conta de usuário, nuvem própria, IA generativa embutida, apócrifos/versifica�
 1. **Estudo** (principal): biblioteca à esquerda · texto bíblico ao centro · painel direito com abas **Léxico / Comentário / Referências** e, abaixo, o **Sermão** em edição.
 2. **Modo Púlpito:** duas colunas, sem barras laterais; texto grande à esquerda, esboço à direita, cronômetro na base.
 3. **Projeção:** janela independente, só o conteúdo.
-4. **Biblioteca:** gerenciar módulos (instalar por arrastar-e-soltar, ocultar, ver metadados).
+4. **Biblioteca:** gerenciar módulos (instalar por arrastar-e-soltar, ocultar, ver metadados). Módulos protegidos aparecem com um cadeado e a mensagem **"Módulo protegido: abra-o no theWord"**, sem nenhuma tentativa de leitura do conteúdo.
 5. **Configurações:** pastas de módulos, tema, fonte, idioma, atalhos.
 6. **Primeiro uso:** localizar módulos → escolher Bíblia padrão → tour de 30 s.
 

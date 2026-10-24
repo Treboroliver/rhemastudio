@@ -200,6 +200,51 @@ Não houve correspondência nos bytes verificados para assinaturas comuns de zli
 
 O leitor preventivo `ensure_twm_unprotected` abre SQLite com `SQLITE_OPEN_READ_ONLY` e retorna `ModuleError::EncryptedModule` quando `config` contém `do.encrypt=1` ou `secure=1`. A verificação não consulta `content`. Não se implementou decodificador para esse dicionário. Nenhum texto de módulo foi copiado para esta documentação.
 
+### 2.5 Validação complementar M1.3c
+
+Todos os módulos listados foram verificados exclusivamente pela tabela `config` antes de qualquer consulta a `content`. Flags ausentes significam apenas que a respectiva chave não foi declarada, não uma garantia sobre licenças ou formatos.
+
+| Módulo | Tamanho (bytes) | `do.encrypt` | `secure` | Compressão declarada |
+|---|---:|---:|---:|---|
+| Holman-AT | 133.131.264 | ausente | ausente | `compressed` ausente |
+| NICNT | 98.189.312 | ausente | ausente | `compressed=1`; `compressed.search.data=0` |
+| VidaNova | 45.006.848 | ausente | ausente | `compressed` ausente |
+| Strong_AMG2 | 36.855.808 | `0` | `0` | `compressed=0`; `compressed.search.data=0` |
+| Mickelson's Strong | 15.924.224 | `1` | `1` | `compressed=1`; `compressed.search.data=1` |
+
+Mickelson foi classificado como protegido e não houve consulta às tabelas de conteúdo neste levantamento.
+
+Em amostras distribuídas até 2.000 linhas por módulo desprotegido, a classificação `RTF` exige o prefixo RTF e a contagem de controles desconhecidos vem do conversor M1.3b:
+
+| Módulo | Linhas amostradas | Classe SQLite de `content.data` | RTF / não RTF | Controles desconhecidos | Média release por entrada |
+|---|---:|---|---:|---|---:|
+| Holman-AT | 2.000 | TEXT (2.000) | 2.000 / 0 | nenhum | 0,171 ms |
+| NICNT | 2.000 | TEXT (2.000) | 2.000 / 0 | nenhum | 0,948 ms |
+| Strong_AMG2 | 2.000 | TEXT (1.999), BLOB (1) | 1.996 / 4 | `charscalex` 1, `clcbpat` 530, `clvertalb` 44, `clvertalc` 478, `expndtw` 15, `trkeep` 2, `trrh` 196 | 0,098 ms |
+| VidaNova | 110 de 110 disponíveis | TEXT (110) | 0 / 110 | nenhum; entradas classificadas como binárias pelo conversor | 0,002 ms |
+
+VidaNova tem apenas 110 entradas, portanto não há 2.000 para converter. Embora o SQLite classifique `data` como TEXT, o conversor RTF existente rejeitou todas as entradas como conteúdo binário/não RTF e retornou árvores vazias: acentuação portuguesa e links bíblicos não foram confirmados (zero links detectados). Não se inferiu outro codec nem se decodificou esse formato desconhecido.
+
+No Strong_AMG2, a chave `G25` existe na coluna `topics.subject`; o conteúdo foi aceito pelo conversor. A forma estrutural da árvore foi `Bold(6), Italic(22), Link(46), Paragraph(8), Text(233)`, sem registrar valores textuais.
+
+Na amostra NICNT, quatro entradas ainda contêm barras invertidas ou chaves no texto simples. Só os escapes estruturais foram retidos: `\\` e `\{` em uma entrada; `\{` e `\}` em cada uma das outras três. Nenhum texto do comentário foi reproduzido.
+
+#### ARA+.ont
+
+`rhema-cli inspect` encontrou 7.221.554 bytes, 31.102 linhas de versículos e 12 linhas de propriedades. A propriedade `charset=0` determina Windows-1252. Chaves registradas: `id`, `lang`, `charset`, `description`, `short.title`, `version.major`, `version.minor`, `version.date`, `creator`, `about`. Metadados de texto longo não são transcritos.
+
+As contagens de marcadores estruturais válidos, filtrando falsos positivos de `<` em texto, foram:
+
+| Família | Ocorrências | Literais distintos |
+|---|---:|---:|
+| `<WG…>` | 114.715 | 5.361 |
+| `<WH…>` | 226.246 | 8.651 |
+| `<G…>` | 28.360 | 146 |
+| `<H…>` | 70.887 | 134 |
+| **Total** | **440.208** | **14.292** |
+
+As formas `<TS…>`, `<CL>`, `<WT…>` e `<RX…>` não apareceram; permanecem **[VERIFICAR]**. O tokenizador percorreu os 31.102 versículos em 1,676 s release e produziu 99.267 `UnknownTag`: 28.360 ocorrências de formas `<G…>` (146 variantes), 70.887 de `<H…>` (134 variantes) e 20 ocorrências em 16 formas misturando texto e marcação. As formas `<G…>`/`<H…>` ainda não são interpretadas pelo tokenizador; não foi inferido seu significado. A investigação revelou e corrigiu a delimitação de propriedades em linhas de continuação iniciadas por `<`, que fazia o leitor incluir propriedades como versículos.
+
 #### Contagens de palavras de controle nos comentários
 
 Contagem total de ocorrências em 2.000 entradas distribuídas por arquivo. As colunas com zero indicam que o controle não apareceu na amostra. Símbolos RTF relevantes, incluindo `\*`, escapes de barras/chaves e `\'hh`, também foram contados.

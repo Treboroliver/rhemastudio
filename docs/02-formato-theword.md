@@ -1,6 +1,6 @@
 # 02 — Formato dos módulos theWord
 
-> **Status do documento:** Especificação refinada nas tarefas **M1.1**, **M1.3b** e **M1.3c**, com schemas, RTF e flags de proteção conferidos em módulos reais. O apêndice detalhado encontra-se em `docs/02-apendice-schemas.md`.
+> **Status do documento:** Especificação refinada nas tarefas **M1.1**, **M1.3b** e **M1.3c**, com schemas, RTF, flags de proteção e observações da ARA+ conferidos em módulos reais. O apêndice detalhado encontra-se em `docs/02-apendice-schemas.md`.
 
 ## 1. Famílias de módulos
 
@@ -62,7 +62,7 @@ Tags com status **Confirmado** foram observadas em módulos reais (incluindo `kj
 - O número de Strong se liga ao último trecho contíguo sem espaços antes da tag, preservando a pontuação adjacente. Se o texto anterior tiver várias palavras, somente a última palavra (com sua pontuação) recebe o Strong. Strong consecutivos aninham-se sobre o mesmo trecho; assim, nenhum deles desloca a associação do anterior.
 - Se não houver palavra anterior para associar, o Strong é preservado como `Strong` sem filhos.
 - `plain_text` concatena texto sem inserir separadores, remove notas e metadados de marcação, e mantém o conteúdo de tags desconhecidas.
-- Para tags [VERIFICAR], o tokenizador aceita `<TS>`/`<TSn>` com `<Ts>`/`<Tsn>`, `<WT…>` como código de morfologia e `<RX…>` como uma referência canônica no formato `Livro capítulo:versículo[-versículo]`. Se `<RX…>` não puder ser interpretada, é preservada como `UnknownTag`. **[VERIFICAR]** o formato e os níveis reais de `<TS>`, a sintaxe de `<WT>` e a codificação de `<RX>` contra módulos reais antes de tratá-los como definitivos.
+- Para tags [VERIFICAR], o tokenizador aceita `<TS>`/`<TSn>` com `<Ts>`/`<Tsn>`, `<WT…>` como código de morfologia e `<RX…>` como uma referência canônica no formato `Livro capítulo:versículo[-versículo]`. Se `<RX…>` não puder ser interpretada, é preservada como `UnknownTag`. A inspeção da ARA+ encontrou zero ocorrências dessas quatro famílias; portanto, **continuam [VERIFICAR]**. Ela também contém famílias `<G…>` e `<H…>` que ainda aparecem como `UnknownTag`; não se inferiu seu significado.
 - Entidades e símbolos especiais: preservar; sanitizar ao renderizar (nunca injetar HTML bruto do módulo).
 
 ### 2.4 Propriedades de módulo
@@ -91,6 +91,7 @@ O resultado das inspeções é colado em `docs/02-apendice-schemas.md` (um bloco
 - Grupos `fonttbl`, `colortbl`, `stylesheet`, `pict` e o destino `notvatxbx` são ignorados. Campos de link aparecem como `\field`, `\fldinst` e `\fldrslt`; o destino bíblico observado usa `tw://bible.*?id=...|_AUTODETECT_|`. No NICNT há milhares de links bíblicos; não foi encontrado link de dicionário nos três módulos amostrados.
 - Grego e hebraico visíveis no NICNT são representados por `\uN`/`\ucN` e decodificados como Unicode. A amostra release de 2.000 entradas continha 117.089 caracteres gregos e 1.186 hebraicos. Não inferir uma codificação de idioma a partir de `fcharset` sem evidência adicional.
 - No dicionário Mickelson, a configuração declara `compressed=1`, `do.encrypt=1` e `secure=1`. A verificação encontrou BLOBs de alta entropia sem assinaturas padrão, mas isso não identifica o codec nem autoriza decodificação. O leitor deve rejeitar este módulo como protegido antes de consultar `content`; não tentar descompactar ou descriptografar. `data2`, `content_type` NULL e links `tw://` de verbetes seguem sem semântica confirmada.
+- Antes de abrir um `.twm`, a biblioteca deve chamar `ensure_twm_unprotected` e não acessar `content` caso receba `EncryptedModule`. A biblioteca ainda não tem função de abertura `.twm`; a chamada e teste com fixture protegida são requisitos obrigatórios de M1.4.
 - Nos textos RTF, `\par` e `\line` produzem nós estruturais; formatação conhecida inclui negrito, itálico, sublinhado, tachado, caixa alta e sobrescrito/subscrito. `plain_text` ignora notas/metadados e mantém o comportamento do tokenizador M1.3.
 - A forma de hiperlink para entradas do dicionário não foi confirmada em conteúdo RTF real; `LinkTarget::Dictionary` é aceito pelo conversor, mas permanece sem validação real.
 

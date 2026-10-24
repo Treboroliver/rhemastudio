@@ -6,7 +6,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use regex::Regex;
 use rusqlite::{Connection, OpenFlags};
 
 use rhema_core::Book;
@@ -642,7 +641,6 @@ fn inspect_bible_file(path: &Path) -> Result<()> {
     let mut property_lines = Vec::new();
     let mut properties = HashMap::new();
 
-    let tag_regex = Regex::new(r"<([^>]+)>")?;
     let mut tag_counts: BTreeMap<String, usize> = BTreeMap::new();
     let mut tag_families: BTreeMap<String, usize> = BTreeMap::new();
 
@@ -669,35 +667,7 @@ fn inspect_bible_file(path: &Path) -> Result<()> {
         } else {
             verse_lines += 1;
 
-            // Escanear todas as tags da linha
-            for cap in tag_regex.captures_iter(line) {
-                let full_tag = &cap[0];
-                let tag_content = &cap[1];
-                *tag_counts.entry(full_tag.to_string()).or_insert(0) += 1;
-
-                // Identificar família da tag
-                let family = if tag_content.starts_with("WG") {
-                    "<WG####> (Strong Grego)".to_string()
-                } else if tag_content.starts_with("WH") {
-                    "<WH####> (Strong Hebraico)".to_string()
-                } else if tag_content.starts_with("WT") {
-                    "<WT...> (Morfologia)".to_string()
-                } else if tag_content.starts_with("TS") {
-                    "<TS...> (Título de Seção)".to_string()
-                } else if tag_content.starts_with("Ts") {
-                    "<Ts...> (Fim Título de Seção)".to_string()
-                } else if tag_content.starts_with("RX") {
-                    "<RX...> (Referência Cruzada)".to_string()
-                } else if tag_content.starts_with("RF") {
-                    "<RF...> (Início Nota Rodapé)".to_string()
-                } else if tag_content.starts_with("Rf") {
-                    "<Rf> (Fim Nota Rodapé)".to_string()
-                } else {
-                    full_tag.to_string()
-                };
-
-                *tag_families.entry(family).or_insert(0) += 1;
-            }
+            count_markup_tags(line, &mut tag_counts, &mut tag_families);
         }
     }
 
@@ -719,7 +689,23 @@ fn inspect_bible_file(path: &Path) -> Result<()> {
     println!("PROPRIEDADES DO MÓDULO (chave=valor)");
     println!("------------------------------------------------------------");
     for (k, v) in &properties {
-        println!("  {} = {}", k, v);
+        let character_count = v.chars().count();
+        if matches!(
+            k.to_ascii_lowercase().as_str(),
+            "about" | "creator" | "description"
+        ) {
+            println!(
+                "  {} = [texto de metadado omitido; {} caracteres]",
+                k, character_count
+            );
+        } else if character_count > 80 {
+            println!(
+                "  {} = [valor longo omitido; {} caracteres]",
+                k, character_count
+            );
+        } else {
+            println!("  {} = {}", k, v);
+        }
     }
 
     // 4. Todas as tags distintas
@@ -744,4 +730,79 @@ fn inspect_bible_file(path: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn count_markup_tags(
+    line: &str,
+    tag_counts: &mut BTreeMap<String, usize>,
+    tag_families: &mut BTreeMap<String, usize>,
+) {
+    let mut cursor = 0usize;
+    while cursor < line.len() {
+        let Some(start_offset) = line[cursor..].find('<') else {
+            break;
+        };
+        let start = cursor + start_offset;
+        let Some(end_offset) = line[start..].find('>') else {
+            break;
+        };
+        let end = start + end_offset;
+        let tag = &line[start..=end];
+        let body = tag
+            .strip_prefix('<')
+            .and_then(|value| value.strip_suffix('>'))
+            .unwrap_or_default();
+        let name = body.strip_prefix('/').unwrap_or(body);
+        let valid = name
+            .chars()
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic())
+            && name
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || character == '_');
+        if valid {
+            *tag_counts.entry(tag.to_string()).or_default() += 1;
+            let family = if name.starts_with("WG") {
+                "<WG####> (Strong Grego)".to_string()
+            } else if name.starts_with("WH") {
+                "<WH####> (Strong Hebraico)".to_string()
+            } else if name.starts_with("WT") {
+                "<WT...> (Morfologia)".to_string()
+            } else if name.starts_with("TS") {
+                "<TS...> (Título de Seção)".to_string()
+            } else if name.starts_with("Ts") {
+                "<Ts...> (Fim Título de Seção)".to_string()
+            } else if name.starts_with("RX") {
+                "<RX...> (Referência Cruzada)".to_string()
+            } else if name.starts_with("RF") {
+                "<RF...> (Início Nota Rodapé)".to_string()
+            } else if name.starts_with("Rf") {
+                "<Rf> (Fim Nota Rodapé)".to_string()
+            } else {
+                tag.to_string()
+            };
+            *tag_families.entry(family).or_default() += 1;
+        }
+        cursor = end + 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::count_markup_tags;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn tag_inspection_ignores_text_spans_absorbing_nested_markers() {
+        let mut tags = BTreeMap::new();
+        let mut families = BTreeMap::new();
+        count_markup_tags(
+            "<word containing <WG123> then <WH456>",
+            &mut tags,
+            &mut families,
+        );
+
+        assert_eq!(tags.get("<WH456>"), Some(&1));
+        assert!(!tags.contains_key("<WG123>"));
+    }
 }

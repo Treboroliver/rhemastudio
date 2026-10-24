@@ -149,6 +149,27 @@ mod tests {
     }
 
     #[test]
+    fn test_property_continuations_may_begin_with_markup_delimiters() {
+        let mut temp = NamedTempFile::new().unwrap();
+        temp.write_all(
+            b"Verse one\n\ncharset=0\ntitle=Synthetic\nabout=first line\\\n<continued metadata>\n",
+        )
+        .unwrap();
+        temp.flush().unwrap();
+
+        let reader = OntReader::open(temp.path()).unwrap();
+        assert_eq!(reader.verse_count(), 1);
+        assert_eq!(
+            reader.properties().get("charset").map(String::as_str),
+            Some("0")
+        );
+        assert_eq!(
+            reader.properties().get("about").map(String::as_str),
+            Some("first line <continued metadata>")
+        );
+    }
+
+    #[test]
     fn test_invalid_verse_ref_returns_not_found() {
         let temp = NamedTempFile::new().unwrap();
         gen_fixtures::generate_synthetic_ont(temp.path(), 65001, false).unwrap();

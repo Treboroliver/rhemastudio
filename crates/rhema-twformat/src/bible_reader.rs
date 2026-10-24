@@ -100,26 +100,54 @@ impl OntReader {
         // 3. Delimitação entre Versículos e Bloco de Propriedades (ao final do arquivo)
         // Varredura de trás para frente reconhecendo propriedades, comentários (#),
         // linhas de continuação indentadas e separadores em branco.
-        let mut last_verse_idx = raw_lines.len().saturating_sub(1);
-        let mut found_verse_boundary = false;
+        let property_start = raw_lines
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(index, &(line_start, line_end))| {
+                is_key_value_property_line(&bytes[line_start..line_end]).then_some(index)
+            })
+            .map(|mut index| {
+                while index > 0 {
+                    let (line_start, line_end) = raw_lines[index - 1];
+                    let previous_line = &bytes[line_start..line_end];
+                    if trim_ascii(previous_line).is_empty() {
+                        index -= 1;
+                        while index > 0 {
+                            let (blank_start, blank_end) = raw_lines[index - 1];
+                            if !trim_ascii(&bytes[blank_start..blank_end]).is_empty() {
+                                break;
+                            }
+                            index -= 1;
+                        }
+                        break;
+                    }
+                    if !is_property_line(previous_line) {
+                        break;
+                    }
+                    index -= 1;
+                }
+                index
+            });
 
-        for (idx, &(l_start, l_end)) in raw_lines.iter().enumerate().rev() {
-            let line_bytes = &bytes[l_start..l_end];
-
-            if is_property_line(line_bytes) {
-                continue;
-            }
-
-            // Encontrou a última linha de texto bíblico
-            last_verse_idx = idx;
-            found_verse_boundary = true;
-            break;
-        }
-
-        let verse_count = if found_verse_boundary {
-            last_verse_idx + 1
+        let verse_count = if let Some(property_start) = property_start {
+            property_start
         } else {
-            raw_lines.len()
+            let mut last_verse_idx = raw_lines.len().saturating_sub(1);
+            let mut found_verse_boundary = false;
+            for (idx, &(line_start, line_end)) in raw_lines.iter().enumerate().rev() {
+                if is_property_line(&bytes[line_start..line_end]) {
+                    continue;
+                }
+                last_verse_idx = idx;
+                found_verse_boundary = true;
+                break;
+            }
+            if found_verse_boundary {
+                last_verse_idx + 1
+            } else {
+                raw_lines.len()
+            }
         };
 
         let verse_offsets: Vec<(usize, usize)> = raw_lines[..verse_count].to_vec();
@@ -363,23 +391,24 @@ fn is_property_line(bytes: &[u8]) -> bool {
         return true;
     }
 
-    // Se contém '=' e o lado esquerdo é um identificador de propriedade theWord
-    if let Some(eq_pos) = trimmed.iter().position(|&b| b == b'=') {
-        if eq_pos > 0 {
-            let left = trim_ascii(&trimmed[..eq_pos]);
-            return !left.is_empty()
-                && left.iter().all(|&b| {
-                    b.is_ascii_alphanumeric()
-                        || b == b'.'
-                        || b == b'_'
-                        || b == b'#'
-                        || b == b'-'
-                        || b == b' '
-                });
-        }
-    }
+    is_key_value_property_line(trimmed)
+}
 
-    false
+fn is_key_value_property_line(bytes: &[u8]) -> bool {
+    let trimmed = trim_ascii(bytes);
+    let Some(eq_pos) = trimmed.iter().position(|&byte| byte == b'=') else {
+        return false;
+    };
+    let left = trim_ascii(&trimmed[..eq_pos]);
+    !left.is_empty()
+        && left.iter().all(|&byte| {
+            byte.is_ascii_alphanumeric()
+                || byte == b'.'
+                || byte == b'_'
+                || byte == b'#'
+                || byte == b'-'
+                || byte == b' '
+        })
 }
 
 /// Remove espaços ASCII nas extremidades de uma fatia de bytes

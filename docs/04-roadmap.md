@@ -23,6 +23,7 @@ Marque `[x]` ao concluir. Cada milestone só termina quando **todos** os critér
 - [x] M1.3c Investigação do Mickelson: flags `do.encrypt=1`/`secure=1` detectadas e `EncryptedModule` retornado antes de acessar o conteúdo; sem decodificação de payload protegido
 - [ ] M1.4 Leitores `.twm`: comentário, dicionário, livro, conforme os schemas e formatos efetivamente observados
   - Nota da M1.3b/M1.3c: comentários Holman/NICNT têm RTF textual; o Mickelson declara compressão e proteção (`do.encrypt=1`, `secure=1`) e deve ser rejeitado sem ler payload. O leitor deve respeitar `content_type` e não presumir que todo conteúdo `.twm` seja RTF. RVF/BLOBs não são decodificados nesta tarefa.
+  - Trava obrigatória: a função de abertura da biblioteca precisa chamar `ensure_twm_unprotected` antes de qualquer consulta de conteúdo; teste sintético com `do.encrypt=1` e `secure=1`. M1.3c complementar encontrou 110 entradas não RTF em VidaNova e 99.267 `UnknownTag` na ARA+; detalhes em `docs/02-apendice-schemas.md`.
 - [ ] M1.5 Gerador de fixtures sintéticas para cada tipo
 - [ ] M1.6 Testes `proptest` do tokenizador + snapshots `insta`
 

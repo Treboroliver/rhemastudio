@@ -1,5 +1,14 @@
 # Changelog — RhemaStudio
 
+## [Complemento M1.3c] — 2026-10-24
+
+### Concluído
+- Acrescentada a exigência da trava de proteção na abertura `.twm` da biblioteca à M1.4; como a biblioteca ainda não tem essa API, o requisito ficou documentado em `AGENTS.md`. Fixtures sintéticas `.twm` confirmam `EncryptedModule` para `do.encrypt=1` e `secure=1`.
+- Verificados os cinco módulos solicitados somente pela tabela `config`; Mickelson foi classificado como protegido e não teve o conteúdo consultado.
+- Amostras release de Holman, NICNT, VidaNova e Strong_AMG2, com contagens de armazenamento, classificação RTF, controles desconhecidos, tempos e forma estrutural de G25 do AMG2 documentadas sem texto dos módulos.
+- ARA+: corrigido no leitor o limite de propriedades com continuação iniciada por `<`; 31.102 versículos e charset 0. As famílias `<TS>`, `<CL>`, `<WT…>` e `<RX…>` não apareceram, portanto continuam [VERIFICAR]. O leitor CLI passou a filtrar falsos positivos de tags originados por sinais `<` em texto.
+- ARA+ gerou 99.267 `UnknownTag`, principalmente códigos `<G…>`/`<H…>` ainda não interpretados. O significado dessas formas permanece aberto; VidaNova não tem 2.000 entradas e seu formato não RTF não foi decodificado.
+
 ## [M1.3c] — 2026-10-24
 
 ### Concluído

@@ -68,7 +68,10 @@ mod tests {
     use tempfile::NamedTempFile;
 
     fn config_module(rows: &[(&str, &str)]) -> NamedTempFile {
-        let file = NamedTempFile::new().expect("criar banco sintético");
+        let file = tempfile::Builder::new()
+            .suffix(".twm")
+            .tempfile()
+            .expect("criar banco sintético .twm");
         let connection = Connection::open(file.path()).expect("abrir banco sintético");
         connection
             .execute_batch("CREATE TABLE config(name TEXT, value TEXT);")
@@ -86,7 +89,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_declared_encrypted_or_secure_modules() {
+    fn synthetic_twm_open_guard_rejects_encryption_and_secure_flags() {
         for config in [
             &[("do.encrypt", "1")][..],
             &[("secure", "true")][..],
