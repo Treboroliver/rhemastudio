@@ -997,8 +997,10 @@ mod tests {
                 let nodes = convert_rtf(&raw);
                 let mut shape = BTreeMap::new();
                 collect_node_shapes(&nodes, &mut shape);
+                let mut links = BTreeMap::new();
+                collect_link_target_counts(&nodes, &mut links);
                 eprintln!(
-                    "Strong_AMG2 G25: existe; coluna-chave={key_column}; conteúdo convertido={}; árvore={shape:?}",
+                    "Strong_AMG2 G25: existe; coluna-chave={key_column}; conteúdo convertido={}; árvore={shape:?}; tipos de destino de link={links:?}; formato={{\\field{{\\*\\fldinst HYPERLINK \"[valor]\"}}{{\\fldrslt [rótulo]}}}}",
                     !nodes.is_empty()
                 );
             }
@@ -1036,6 +1038,49 @@ mod tests {
             if let Some(children) = children {
                 collect_node_shapes(children, counts);
             }
+        }
+    }
+
+    fn collect_link_target_counts(nodes: &[Node], counts: &mut BTreeMap<String, usize>) {
+        for node in nodes {
+            let children = match node {
+                Node::Link { target, children } => {
+                    let kind = match target {
+                        LinkTarget::Bible(_) => "versículo".to_string(),
+                        LinkTarget::Dictionary(key)
+                            if key
+                                .strip_prefix('G')
+                                .or_else(|| key.strip_prefix('H'))
+                                .is_some_and(|suffix| {
+                                    !suffix.is_empty()
+                                        && suffix
+                                            .chars()
+                                            .all(|character| character.is_ascii_digit())
+                                }) =>
+                        {
+                            "verbete G/H".to_string()
+                        }
+                        LinkTarget::Dictionary(_) | LinkTarget::Other(_) => "outro".to_string(),
+                    };
+                    *counts.entry(kind).or_default() += 1;
+                    children
+                }
+                Node::Italic(children)
+                | Node::Bold(children)
+                | Node::Underline(children)
+                | Node::Strikethrough(children)
+                | Node::Caps(children)
+                | Node::Superscript(children)
+                | Node::Subscript(children)
+                | Node::WordsOfJesus(children)
+                | Node::OtQuote(children)
+                | Node::Heading(_, children)
+                | Node::Strong { children, .. }
+                | Node::Note(children)
+                | Node::UnknownTag { children, .. } => children,
+                _ => continue,
+            };
+            collect_link_target_counts(children, counts);
         }
     }
 

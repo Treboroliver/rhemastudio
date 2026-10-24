@@ -9,7 +9,7 @@
 | `.ont` | Bíblia completa (AT + NT) | Texto simples + tags + propriedades no fim | Confirmado (31.102 versículos) |
 | `.ot` | Somente Antigo Testamento | idem | Confirmado (23.145 versículos) |
 | `.nt` | Somente Novo Testamento | idem | Confirmado (7.957 versículos) |
-| `.cmt.twm` | Comentário (ligado a versículo, faixa, capítulo ou livro) | SQLite; conteúdo RTF em texto | Confirmado em Holman e NICNT |
+| `.cmt.twm` | Comentário (ligado a versículo, faixa, capítulo ou livro) | SQLite; `content_type` por entrada; RTF em alguns módulos e RVF em VidaNova | RTF confirmado em Holman/NICNT; RVF identificado, sem parser |
 | `.gbk.twm` | Livro geral (capítulos/seções) | SQLite | Confirmado (SQLite) |
 | `.dct.twm` | Dicionário / léxico (ex.: Strong) | SQLite; `content.data` pode ser BLOB opaco | Mickelson declara compressão e proteção; conteúdo não decodificado |
 | `.dev.twm` | Devocional diário | SQLite | Confirmado (extensão) |
@@ -60,7 +60,7 @@ Tags com status **Confirmado** foram observadas em módulos reais (incluindo `kj
 - **Tag desconhecida nunca falha:** vira `UnknownTag{name, raw, children}`; `raw` preserva a grafia original das tags e `children` preserva o conteúdo interno.
 - Tags abertas são fechadas automaticamente no fim do versículo; fechamentos sem abertura correspondente são ignorados.
 - O número de Strong se liga ao último trecho contíguo sem espaços antes da tag, preservando a pontuação adjacente. Se o texto anterior tiver várias palavras, somente a última palavra (com sua pontuação) recebe o Strong. Strong consecutivos aninham-se sobre o mesmo trecho; assim, nenhum deles desloca a associação do anterior.
-- Se não houver palavra anterior para associar, o Strong é preservado como `Strong` sem filhos.
+- Se não houver palavra anterior para associar, o Strong é preservado como `Strong` sem filhos. Na ARA+, `<G…>` e `<H…>` adjacentes frequentemente aparecem depois de `<WG…>`/`<WH…>`, mas seus números diferem em todas as 98.969 ocorrências pareadas; 278 ocorrências aparecem sem `W`. A semântica permanece incerta, então essas tags continuam como `UnknownTag`.
 - `plain_text` concatena texto sem inserir separadores, remove notas e metadados de marcação, e mantém o conteúdo de tags desconhecidas.
 - Para tags [VERIFICAR], o tokenizador aceita `<TS>`/`<TSn>` com `<Ts>`/`<Tsn>`, `<WT…>` como código de morfologia e `<RX…>` como uma referência canônica no formato `Livro capítulo:versículo[-versículo]`. Se `<RX…>` não puder ser interpretada, é preservada como `UnknownTag`. A inspeção da ARA+ encontrou zero ocorrências dessas quatro famílias; portanto, **continuam [VERIFICAR]**. Ela também contém famílias `<G…>` e `<H…>` que ainda aparecem como `UnknownTag`; não se inferiu seu significado.
 - Entidades e símbolos especiais: preservar; sanitizar ao renderizar (nunca injetar HTML bruto do módulo).
@@ -83,7 +83,8 @@ O resultado das inspeções é colado em `docs/02-apendice-schemas.md` (um bloco
 - **Dicionário (`dct`):** busca por chave exata (`G25`, `H1254`, ou palavra). Strong grego/hebraico são os casos principais.
 - **Livro (`gbk`):** árvore de capítulos/seções; leitura sequencial; busca no texto. Híbrido: ligações a versículos aparecem como chips.
 - **Devocional (`dev`):** entradas por data (dia/mês).
-- Conteúdo textual pode conter marcação própria (links, formatação). Mesmo tokenizador tolerante; se o formato diferir, criar módulo `markup_twm` separado.
+- Respeitar `content_type` em cada entrada; `config.content.type` é apenas uma declaração padrão observada em alguns módulos. Não presumir que todo `content.data` seja RTF.
+- Conteúdo pode usar marcação própria, como links e formatação. Em formatos sem especificação confirmada, não decodificar por tentativa; documentar a evidência e aguardar a definição do formato antes de implementar leitor.
 
 ### Conversão RTF confirmada na M1.3b
 - Nos comentários Holman-AT e NICNT, `content.data` contém RTF textual, normalmente iniciado por `{\rtf1`; o conteúdo não estava comprimido nas amostras.
@@ -94,6 +95,8 @@ O resultado das inspeções é colado em `docs/02-apendice-schemas.md` (um bloco
 - Antes de abrir um `.twm`, a biblioteca deve chamar `ensure_twm_unprotected` e não acessar `content` caso receba `EncryptedModule`. A biblioteca ainda não tem função de abertura `.twm`; a chamada e teste com fixture protegida são requisitos obrigatórios de M1.4.
 - Nos textos RTF, `\par` e `\line` produzem nós estruturais; formatação conhecida inclui negrito, itálico, sublinhado, tachado, caixa alta e sobrescrito/subscrito. `plain_text` ignora notas/metadados e mantém o comportamento do tokenizador M1.3.
 - A forma de hiperlink para entradas do dicionário não foi confirmada em conteúdo RTF real; `LinkTarget::Dictionary` é aceito pelo conversor, mas permanece sem validação real.
+- VidaNova declara `content.type=rvf` e todas as 110 linhas de `bible_refs.content_type` são `rvf`; o prefixo dos dados é próprio do RVF, não RTF, HTML ou texto simples. O formato ainda não tem especificação confirmada neste repositório; não há conversor nem contagem confiável de acentos/links para essas entradas.
+- No verbete G25 de Strong_AMG2, foram observados 46 campos RTF `HYPERLINK`: 39 destinos `tw://` com `id` no formato estrutural `[número].[número].[número]` resolvem para versículos; 7 destinos `id=[número]` ficam como `Other`; nenhum aponta para outro verbete G/H.
 
 ## 4. Strong e léxico
 - Bíblia com Strong: tags `<WG…>`/`<WH…>`.

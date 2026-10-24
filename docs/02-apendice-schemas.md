@@ -223,7 +223,7 @@ Em amostras distribuídas até 2.000 linhas por módulo desprotegido, a classifi
 | Strong_AMG2 | 2.000 | TEXT (1.999), BLOB (1) | 1.996 / 4 | `charscalex` 1, `clcbpat` 530, `clvertalb` 44, `clvertalc` 478, `expndtw` 15, `trkeep` 2, `trrh` 196 | 0,098 ms |
 | VidaNova | 110 de 110 disponíveis | TEXT (110) | 0 / 110 | nenhum; entradas classificadas como binárias pelo conversor | 0,002 ms |
 
-VidaNova tem apenas 110 entradas, portanto não há 2.000 para converter. Embora o SQLite classifique `data` como TEXT, o conversor RTF existente rejeitou todas as entradas como conteúdo binário/não RTF e retornou árvores vazias: acentuação portuguesa e links bíblicos não foram confirmados (zero links detectados). Não se inferiu outro codec nem se decodificou esse formato desconhecido.
+VidaNova tem apenas 110 entradas, portanto não há 2.000 para converter. Embora o SQLite classifique `data` como TEXT, o conversor RTF existente rejeitou todas as entradas como conteúdo não RTF e retornou árvores vazias: acentuação portuguesa e links bíblicos não foram confirmados (zero resultados do conversor, sem valor semântico). A M1.3d identificou RVF por `content.type`, `content_type` e prefixo estrutural, mas não há especificação confirmada nem conversor; consulte a análise estrutural abaixo.
 
 No Strong_AMG2, a chave `G25` existe na coluna `topics.subject`; o conteúdo foi aceito pelo conversor. A forma estrutural da árvore foi `Bold(6), Italic(22), Link(46), Paragraph(8), Text(233)`, sem registrar valores textuais.
 
@@ -244,6 +244,73 @@ As contagens de marcadores estruturais válidos, filtrando falsos positivos de `
 | **Total** | **440.208** | **14.292** |
 
 As formas `<TS…>`, `<CL>`, `<WT…>` e `<RX…>` não apareceram; permanecem **[VERIFICAR]**. O tokenizador percorreu os 31.102 versículos em 1,676 s release e produziu 99.267 `UnknownTag`: 28.360 ocorrências de formas `<G…>` (146 variantes), 70.887 de `<H…>` (134 variantes) e 20 ocorrências em 16 formas misturando texto e marcação. As formas `<G…>`/`<H…>` ainda não são interpretadas pelo tokenizador; não foi inferido seu significado. A investigação revelou e corrigiu a delimitação de propriedades em linhas de continuação iniciadas por `<`, que fazia o leitor incluir propriedades como versículos.
+
+#### VidaNova.cmt.twm — conteúdo RVF (M1.3d)
+
+A leitura começou pela tabela `config`. Não há `do.encrypt`, `secure` ou `compressed`; não foi observada indicação explícita de proteção. Nenhum payload foi descomprimido ou decodificado.
+
+| Chave | Valor curto |
+|---|---|
+| `abbrev` | `Vida Nova` |
+| `about` | `[texto omitido; 10.164.593 bytes]` |
+| `author` | `D. A. Carson` |
+| `content.type` | `rvf` |
+| `creator` | `Keryx Digital` |
+| `description` | `Comentário Bíblico Vida Nova` |
+| `id` | `VidaNova.cmt` |
+| `images.allow.autoresize` | `1` |
+| `isbn` | `978-85-275-0424-9` |
+| `lang` | `por` |
+| `preserve.fonts` | `1` |
+| `publish.date` | `2009` |
+| `publisher` | `Vida Nova` |
+| `schema.version` | `1` |
+| `search.index.ref.ver` | `47` |
+| `search.index.ver` | `15` |
+| `title` | `CB_Vida Nova` |
+| `title.english` | NULL |
+| `type` | `2` |
+| `user` | `1` |
+| `version.date` | `2014-10-21` |
+
+| Tabela | Linhas | Colunas |
+|---|---:|---|
+| `bible_link_search` | 28 | `topic_id INTEGER`, `data TEXT` |
+| `bible_refs` | 110 | `topic_id INTEGER`, `bi INTEGER`, `ci INTEGER`, `fvi INTEGER`, `tvi INTEGER`, `content_type TEXT` |
+| `config` | 21 | `name TEXT`, `value TEXT` |
+| `content` | 110 | `topic_id INTEGER`, `data BLOB`, `data2 BLOB` |
+| `content_search` | 110 | `topic_id INTEGER`, `data BLOB` |
+| `sqlite_sequence` | 1 | `name`, `seq` |
+
+O único `content_type` distinto em `bible_refs` é `rvf` (110 linhas); a configuração também declara `content.type=rvf`. Todos os 110 `content.data` são armazenados pelo SQLite como `TEXT`, embora seus bytes não sejam UTF-8 válido. Nenhuma entrada começa por `{\rtf` ou `<`: 0/110 RTF padrão, 0/110 com `<` e 110/110 com outro prefixo. O único formato observado tem 95 prefixos distintos nos primeiros 40 bytes; o prefixo estrutural comum, com os bytes de controle e o restante variável ocultados, é `-8 1 3\r\n-9 2 0 0 2 0 1\r\nrvsDyna\r\nB[controle…]`. Isso sustenta a identificação como formato próprio RVF, não como HTML ou texto simples.
+
+Em bytes retornados pelo SQLite, `content.data` tem mínimo 1.385, mediana 80.981,5 e máximo 1.572.389 bytes (18.848.948 no total); `data2` é NULL em 110/110. O arquivo tem 45.006.848 bytes porque há também 14.614.854 bytes em `content_search.data`, 274.091 em `bible_link_search.data` e 10.164.593 no valor `config.about`. A soma desses campos é 43.902.486 bytes; o restante corresponde a páginas livres e estrutura SQLite (1.024 bytes/página, 43.952 páginas, 837 livres). O `length()` SQL para `content.data` não representa os bytes completos por causa de NULs embutidos.
+
+O conversor RTF existente rejeita as 110 entradas como não RTF. Como não há especificação RVF confirmada neste repositório, não foi criado parser, nem tentada conversão. A contagem de entradas com acentos corretos e de links bíblicos permanece **indeterminada**; os zero links relatados pelo conversor RTF são apenas zero resultados de um parser que não aceitou a entrada, não evidência de ausência de links.
+
+#### Strong_AMG2.dct.twm — ligações de G25 (M1.3d)
+
+G25 contém 46 campos RTF do tipo `{\field{\*\fldinst HYPERLINK "[valor]"}{\fldrslt [rótulo]}}`. Todos os destinos usam esquema `tw://` e parâmetro `id=[valor]`; 39 valores têm a forma estrutural `[número].[número].[número]|[marcador]` e são referências a versículos reconhecidas pelo conversor. Os outros 7 têm a forma `[número]` sem sufixo, não correspondem a verbetes G/H e são mantidos como `Other`. Resultado: **0** links para outros verbetes G/H, **39** para versículos e **7** de outro tipo. Nenhum destino ou rótulo real foi reproduzido.
+
+#### ARA+.ont — posição e relação entre `<G…>` e `<WG…>` / `<H…>` e `<WH…>` (M1.3d)
+
+As propriedades confirmadas são `about`, `charset=0`, `creator`, `description`, `id=b114`, `lang=br`, `short.title=ARA+`, `version.date=2009-10-05`, `version.major=1` e `version.minor=0`; `untranslated.strong.format` não existe. Os valores textuais de metadados foram omitidos. As ocorrências foram comparadas por adjacência textual exata entre as tags:
+
+| Família da tag final | Número igual ao `W` imediatamente anterior | Número diferente | Sem `W` imediatamente anterior |
+|---|---:|---:|---:|
+| `<G…>` após `<WG…>` | 0 | 28.241 | 119 |
+| `<H…>` após `<WH…>` | 0 | 70.728 | 159 |
+
+Em relação à palavra visível (após remover tags), 28.359 tags `<G…>` e 70.885 `<H…>` ficam depois de uma palavra; nenhuma fica antes ou divide uma palavra. Uma `<G…>` e duas `<H…>` não têm palavra vizinha. Nenhuma ocorrência analisada está dentro dos spans conhecidos `<FR>…<Fr>`, `<FI>…<Fi>`, `<RF>…<Rf>`, `<FO>…<Fo>` ou `<i>…</i>`.
+
+Exemplos estruturais, com cada palavra substituída por `[palavra]`:
+
+| Família | Cinco exemplos |
+|---|---|
+| `<G…>` | `[palavra]<WG1080><G5656>` · `[palavra]<WG1080><G5681>` · `[palavra]<WG3004><G5746>` · `[palavra]<WG2258><G5713>` · `[palavra]<G5625>` |
+| `<H…>` | `[palavra]<WH1254><H8804>` · `[palavra]<WH1961><H8804>` · `[palavra]<WH7363><H8764>` · `[palavra]<WH559><H8799>` · `[palavra]<H8675>` |
+
+Os dados sustentam que `<G…>`/`<H…>` são marcadores adicionais associados sobretudo depois da palavra e frequentemente adjacentes a `<WG…>`/`<WH…>`, mas com números diferentes; há também formas sem o marcador `W`. Isso não sustenta tratá-los como aliases de Strong. **Proposta, não implementada:** manter `UnknownTag` e seu `raw` até que uma especificação ou evidência independente esclareça a semântica; não associar esses números a `Node::Strong` nem descartá-los. Seguem incertos o significado dos números, a relação entre as duas famílias e o tratamento correto das 20 formas mistas restantes.
 
 #### Contagens de palavras de controle nos comentários
 

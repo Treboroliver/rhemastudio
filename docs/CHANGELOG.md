@@ -1,5 +1,13 @@
 # Changelog — RhemaStudio
 
+## [Complemento M1.3d] — 2026-10-24
+
+### Concluído
+- VidaNova: configuração, schema, contagens e tamanhos estruturais verificados em modo somente leitura. `content.type` e as 110 entradas declaram `rvf`; o prefixo confirma formato próprio não RTF/HTML. Como não há especificação RVF confirmada, nada foi decodificado ou convertido; acentos e links seguem indeterminados.
+- ARA+: comparadas 99.247 tags `<G…>`/`<H…>` com `<WG…>`/`<WH…>` adjacentes; todos os pares têm números diferentes e 278 tags não têm `W` imediatamente anterior. As tags permanecem desconhecidas; proposta de tratamento documentada, sem implementação.
+- Strong_AMG2 G25: estrutura dos 46 destinos documentada sem valores ou rótulos; 39 referências a versículos, zero verbetes G/H e 7 destinos de outro tipo.
+- Atualizados `docs/02-apendice-schemas.md` e `docs/02-formato-theword.md`; nenhuma alteração de leitor/tokenizador ou início da M1.4.
+
 ## [Complemento M1.3c] — 2026-10-24
 
 ### Concluído
@@ -7,7 +15,7 @@
 - Verificados os cinco módulos solicitados somente pela tabela `config`; Mickelson foi classificado como protegido e não teve o conteúdo consultado.
 - Amostras release de Holman, NICNT, VidaNova e Strong_AMG2, com contagens de armazenamento, classificação RTF, controles desconhecidos, tempos e forma estrutural de G25 do AMG2 documentadas sem texto dos módulos.
 - ARA+: corrigido no leitor o limite de propriedades com continuação iniciada por `<`; 31.102 versículos e charset 0. As famílias `<TS>`, `<CL>`, `<WT…>` e `<RX…>` não apareceram, portanto continuam [VERIFICAR]. O leitor CLI passou a filtrar falsos positivos de tags originados por sinais `<` em texto.
-- ARA+ gerou 99.267 `UnknownTag`, principalmente códigos `<G…>`/`<H…>` ainda não interpretados. O significado dessas formas permanece aberto; VidaNova não tem 2.000 entradas e seu formato não RTF não foi decodificado.
+- ARA+ gerou 99.267 `UnknownTag`, principalmente códigos `<G…>`/`<H…>` ainda não interpretados. A análise M1.3d confirmou que os números pareados são diferentes, mas não estabeleceu a semântica. VidaNova tem 110 entradas RVF; a estrutura foi caracterizada sem decodificação.
 
 ## [M1.3c] — 2026-10-24
 
