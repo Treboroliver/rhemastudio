@@ -1,6 +1,6 @@
 # 02 — Formato dos módulos theWord
 
-> **Status do documento:** Especificação refinada nas tarefas **M1.1**, **M1.3b** e **M1.3c**, com schemas, RTF, flags de proteção e observações da ARA+ conferidos em módulos reais. O apêndice detalhado encontra-se em `docs/02-apendice-schemas.md`.
+> **Status do documento:** Especificação refinada nas tarefas **M1.1**, **M1.3b**, **M1.3c** e **M1.3e**, com schemas, RTF, flags de proteção, RVF e códigos gramaticais observados em módulos reais. O apêndice detalhado encontra-se em `docs/02-apendice-schemas.md`.
 
 ## 1. Famílias de módulos
 
@@ -9,7 +9,7 @@
 | `.ont` | Bíblia completa (AT + NT) | Texto simples + tags + propriedades no fim | Confirmado (31.102 versículos) |
 | `.ot` | Somente Antigo Testamento | idem | Confirmado (23.145 versículos) |
 | `.nt` | Somente Novo Testamento | idem | Confirmado (7.957 versículos) |
-| `.cmt.twm` | Comentário (ligado a versículo, faixa, capítulo ou livro) | SQLite; `content_type` por entrada; RTF em alguns módulos e RVF em VidaNova | RTF confirmado em Holman/NICNT; RVF identificado, sem parser |
+| `.cmt.twm` | Comentário (ligado a versículo, faixa, capítulo ou livro) | SQLite; `content_type` por entrada; RTF ou RVF | RTF confirmado em Holman/NICNT; RVF em VidaNova e uma entrada Holman |
 | `.gbk.twm` | Livro geral (capítulos/seções) | SQLite | Confirmado (SQLite) |
 | `.dct.twm` | Dicionário / léxico (ex.: Strong) | SQLite; `content.data` pode ser BLOB opaco | Mickelson declara compressão e proteção; conteúdo não decodificado |
 | `.dev.twm` | Devocional diário | SQLite | Confirmado (extensão) |
@@ -44,6 +44,8 @@ Tags com status **Confirmado** foram observadas em módulos reais (incluindo `kj
 | `<WH####>` | Número de Strong hebraico | `Strong{Hebrew, n}` | Confirmado |
 | `<WG####x>` | Variante observada no `kjv.ont` (sufixo `x` após o número) | `Strong{Greek, n}` | Confirmado |
 | `<XWG####>` | Strong grego não traduzido | `Strong{Greek, n}` | Confirmado |
+| `<G####>` após Strong grego | Código gramatical associado ao Strong anterior | `Grammar{Greek, code}` | Confirmado estruturalmente na ARA+ (sem catálogo semântico) |
+| `<H####>` após Strong hebraico | Código gramatical associado ao Strong anterior | `Grammar{Hebrew, code}` | Confirmado estruturalmente na ARA+ (sem catálogo semântico) |
 | `<FR>…<Fr>` | Palavras de Jesus | `WordsOfJesus` | Confirmado |
 | `<FI>…<Fi>` | Itálico (palavras adicionadas) | `Italic` | Confirmado |
 | `<RF>…<Rf>` | Nota de rodapé | `Note` | Confirmado |
@@ -60,9 +62,9 @@ Tags com status **Confirmado** foram observadas em módulos reais (incluindo `kj
 - **Tag desconhecida nunca falha:** vira `UnknownTag{name, raw, children}`; `raw` preserva a grafia original das tags e `children` preserva o conteúdo interno.
 - Tags abertas são fechadas automaticamente no fim do versículo; fechamentos sem abertura correspondente são ignorados.
 - O número de Strong se liga ao último trecho contíguo sem espaços antes da tag, preservando a pontuação adjacente. Se o texto anterior tiver várias palavras, somente a última palavra (com sua pontuação) recebe o Strong. Strong consecutivos aninham-se sobre o mesmo trecho; assim, nenhum deles desloca a associação do anterior.
-- Se não houver palavra anterior para associar, o Strong é preservado como `Strong` sem filhos. Na ARA+, `<G…>` e `<H…>` adjacentes frequentemente aparecem depois de `<WG…>`/`<WH…>`, mas seus números diferem em todas as 98.969 ocorrências pareadas; 278 ocorrências aparecem sem `W`. A semântica permanece incerta, então essas tags continuam como `UnknownTag`.
-- `plain_text` concatena texto sem inserir separadores, remove notas e metadados de marcação, e mantém o conteúdo de tags desconhecidas.
-- Para tags [VERIFICAR], o tokenizador aceita `<TS>`/`<TSn>` com `<Ts>`/`<Tsn>`, `<WT…>` como código de morfologia e `<RX…>` como uma referência canônica no formato `Livro capítulo:versículo[-versículo]`. Se `<RX…>` não puder ser interpretada, é preservada como `UnknownTag`. A inspeção da ARA+ encontrou zero ocorrências dessas quatro famílias; portanto, **continuam [VERIFICAR]**. Ela também contém famílias `<G…>` e `<H…>` que ainda aparecem como `UnknownTag`; não se inferiu seu significado.
+- Se não houver palavra anterior para associar, o Strong é preservado como `Strong` sem filhos. Na ARA+, 28.359/28.360 valores `<G…>` excedem a maior chave `G5624` e 70.887/70.887 valores `<H…>` excedem `H8674`. `<Gdigits>`/`<Hdigits>` numéricas imediatamente após um `Strong` da mesma língua são interpretadas como `Grammar { lang, code }` dentro desse `Strong`; sem Strong anterior correspondente ficam como `UnknownTag`. A evidência sustenta códigos gramaticais, mas não fornece um catálogo semântico dos códigos.
+- `plain_text` concatena texto sem inserir separadores, remove notas e metadados de marcação, mantém o conteúdo das tags desconhecidas e omite `Grammar`.
+- Para tags [VERIFICAR], o tokenizador aceita `<TS>`/`<TSn>` com `<Ts>`/`<Tsn>`, `<WT…>` como código de morfologia e `<RX…>` como uma referência canônica no formato `Livro capítulo:versículo[-versículo]`. Se `<RX…>` não puder ser interpretada, é preservada como `UnknownTag`. A inspeção da ARA+ encontrou zero ocorrências dessas quatro famílias; portanto, **continuam [VERIFICAR]**. As tags gramaticais reconhecidas são metadados, não links clicáveis para verbetes.
 - Entidades e símbolos especiais: preservar; sanitizar ao renderizar (nunca injetar HTML bruto do módulo).
 
 ### 2.4 Propriedades de módulo
@@ -85,6 +87,7 @@ O resultado das inspeções é colado em `docs/02-apendice-schemas.md` (um bloco
 - **Devocional (`dev`):** entradas por data (dia/mês).
 - Respeitar `content_type` em cada entrada; `config.content.type` é apenas uma declaração padrão observada em alguns módulos. Não presumir que todo `content.data` seja RTF.
 - Conteúdo pode usar marcação própria, como links e formatação. Em formatos sem especificação confirmada, não decodificar por tentativa; documentar a evidência e aguardar a definição do formato antes de implementar leitor.
+- RVF também aparece em dados por entrada: 32 tópicos de Strong_AMG2 e uma referência de Holman declaram `rvf`, embora `config.content.type` de Strong_AMG2/Holman seja `rtf`.
 
 ### Conversão RTF confirmada na M1.3b
 - Nos comentários Holman-AT e NICNT, `content.data` contém RTF textual, normalmente iniciado por `{\rtf1`; o conteúdo não estava comprimido nas amostras.
@@ -94,8 +97,9 @@ O resultado das inspeções é colado em `docs/02-apendice-schemas.md` (um bloco
 - No dicionário Mickelson, a configuração declara `compressed=1`, `do.encrypt=1` e `secure=1`. A verificação encontrou BLOBs de alta entropia sem assinaturas padrão, mas isso não identifica o codec nem autoriza decodificação. O leitor deve rejeitar este módulo como protegido antes de consultar `content`; não tentar descompactar ou descriptografar. `data2`, `content_type` NULL e links `tw://` de verbetes seguem sem semântica confirmada.
 - Antes de abrir um `.twm`, a biblioteca deve chamar `ensure_twm_unprotected` e não acessar `content` caso receba `EncryptedModule`. A biblioteca ainda não tem função de abertura `.twm`; a chamada e teste com fixture protegida são requisitos obrigatórios de M1.4.
 - Nos textos RTF, `\par` e `\line` produzem nós estruturais; formatação conhecida inclui negrito, itálico, sublinhado, tachado, caixa alta e sobrescrito/subscrito. `plain_text` ignora notas/metadados e mantém o comportamento do tokenizador M1.3.
+- `decode_twm_content(content_type, bytes)` despacha somente `"rtf"` para o conversor RTF. `"rvf"` e tipos desconhecidos retornam `ModuleError::UnsupportedContent(tipo)`. O conversor exige cabeçalho RTF e retorna erro tipado para outros bytes em vez de uma árvore vazia silenciosa; grupos RTF malformados com cabeçalho continuam tolerados.
 - A forma de hiperlink para entradas do dicionário não foi confirmada em conteúdo RTF real; `LinkTarget::Dictionary` é aceito pelo conversor, mas permanece sem validação real.
-- VidaNova declara `content.type=rvf` e todas as 110 linhas de `bible_refs.content_type` são `rvf`; o prefixo dos dados é próprio do RVF, não RTF, HTML ou texto simples. O formato ainda não tem especificação confirmada neste repositório; não há conversor nem contagem confiável de acentos/links para essas entradas.
+- VidaNova declara `content.type=rvf` e todas as 110 linhas de `bible_refs.content_type` são `rvf`; o prefixo dos dados é próprio do RVF, não RTF, HTML ou texto simples. A especificação pública genérica RichView RVF foi consultada, mas o perfil exato do theWord não foi confirmado e não há conversor RVF.
 - No verbete G25 de Strong_AMG2, foram observados 46 campos RTF `HYPERLINK`: 39 destinos `tw://` com `id` no formato estrutural `[número].[número].[número]` resolvem para versículos; 7 destinos `id=[número]` ficam como `Other`; nenhum aponta para outro verbete G/H.
 
 ## 4. Strong e léxico
@@ -133,6 +137,7 @@ pub enum Node {
     OtQuote(Vec<Node>),
     Heading(u8, Vec<Node>),
     Strong { lang: StrongLang, num: u32, children: Vec<Node> },
+    Grammar { lang: StrongLang, code: u32 },
     Morph(String),
     Note(Vec<Node>),
     XRef(VerseRange),

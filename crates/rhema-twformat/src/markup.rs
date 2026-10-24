@@ -35,6 +35,7 @@ enum Token {
     },
     Inline(Node),
     Strong(StrongLang, u32),
+    Grammar(StrongLang, u32),
     Unknown {
         name: String,
         self_closing: bool,
@@ -124,6 +125,22 @@ pub fn tokenize_markup(input: &str) -> Vec<Node> {
                     );
                 }
             }
+            Token::Grammar(lang, code) => {
+                if !attach_grammar(&mut root, &mut stack, lang, code) {
+                    append_node(
+                        &mut root,
+                        &mut stack,
+                        Node::UnknownTag {
+                            name: match lang {
+                                StrongLang::Greek => format!("G{code}"),
+                                StrongLang::Hebrew => format!("H{code}"),
+                            },
+                            raw: raw_tag.to_string(),
+                            children: Vec::new(),
+                        },
+                    );
+                }
+            }
             Token::Unknown { name, self_closing } => {
                 let kind = FrameKind::Unknown;
                 if self_closing {
@@ -207,6 +224,9 @@ fn parse_token(contents: &str) -> Token {
     if let Some(strong) = parse_strong(tag) {
         return Token::Strong(strong.0, strong.1);
     }
+    if let Some(grammar) = parse_grammar(tag) {
+        return Token::Grammar(grammar.0, grammar.1);
+    }
     if let Some(payload) = tag.strip_prefix("WT") {
         return Token::Inline(Node::Morph(payload.to_string()));
     }
@@ -263,6 +283,19 @@ fn parse_strong(tag: &str) -> Option<(StrongLang, u32)> {
         return None;
     }
     digits.parse().ok().map(|num| (lang, num))
+}
+
+fn parse_grammar(tag: &str) -> Option<(StrongLang, u32)> {
+    let (prefix, lang) = match tag.as_bytes().first()? {
+        b'G' => ("G", StrongLang::Greek),
+        b'H' => ("H", StrongLang::Hebrew),
+        _ => return None,
+    };
+    let digits = tag.strip_prefix(prefix)?;
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok().map(|code| (lang, code))
 }
 
 fn parse_container_name(tag: &str, closing: bool) -> Option<(FrameKind, String)> {
@@ -412,10 +445,41 @@ fn attach_strong_to_nodes(nodes: &mut Vec<Node>, lang: StrongLang, num: u32) -> 
                     return true;
                 }
             }
-            Node::Morph(_) | Node::XRef(_) | Node::Paragraph | Node::LineBreak => {}
+            Node::Grammar { .. }
+            | Node::Morph(_)
+            | Node::XRef(_)
+            | Node::Paragraph
+            | Node::LineBreak => {}
         }
     }
     false
+}
+
+fn attach_grammar(root: &mut [Node], stack: &mut [Frame], lang: StrongLang, code: u32) -> bool {
+    for frame in stack.iter_mut().rev() {
+        if attach_grammar_to_nodes(&mut frame.children, lang, code) {
+            return true;
+        }
+    }
+    attach_grammar_to_nodes(root, lang, code)
+}
+
+fn attach_grammar_to_nodes(nodes: &mut [Node], lang: StrongLang, code: u32) -> bool {
+    let Some(last) = nodes.last_mut() else {
+        return false;
+    };
+    match last {
+        Node::Strong {
+            lang: strong_lang,
+            children,
+            ..
+        } if *strong_lang == lang => {
+            children.push(Node::Grammar { lang, code });
+            true
+        }
+        Node::Strong { children, .. } => attach_grammar_to_nodes(children, lang, code),
+        _ => false,
+    }
 }
 
 fn trailing_word_range(text: &str) -> Option<(usize, usize)> {
@@ -457,7 +521,11 @@ mod tests {
                 | Node::Note(children)
                 | Node::UnknownTag { children, .. }
                 | Node::Link { children, .. } => output.push_str(&visible_text(children)),
-                Node::Paragraph | Node::LineBreak | Node::Morph(_) | Node::XRef(_) => {}
+                Node::Grammar { .. }
+                | Node::Paragraph
+                | Node::LineBreak
+                | Node::Morph(_)
+                | Node::XRef(_) => {}
             }
         }
         output
@@ -551,6 +619,43 @@ mod tests {
     }
 
     #[test]
+    fn parses_grammar_tags_as_non_text_children_of_the_previous_strong() {
+        let nodes = tokenize_markup("word<WG25><G5656>");
+        assert!(matches!(
+            nodes.as_slice(),
+            [Node::Strong {
+                lang: StrongLang::Greek,
+                num: 25,
+                children,
+            }] if matches!(
+                children.as_slice(),
+                [Node::Text(word), Node::Grammar {
+                    lang: StrongLang::Greek,
+                    code: 5656,
+                }] if word == "word"
+            )
+        ));
+        assert_eq!(plain_text(&nodes), "word");
+        assert!(!nodes.iter().any(|node| matches!(node, Node::Link { .. })));
+    }
+
+    #[test]
+    fn unmatched_or_mismatched_grammar_tags_remain_unknown() {
+        let unmatched = tokenize_markup("word<G5656>");
+        assert!(matches!(
+            unmatched.as_slice(),
+            [Node::Text(_), Node::UnknownTag { name, raw, .. }]
+                if name == "G5656" && raw == "<G5656>"
+        ));
+
+        let mismatched = tokenize_markup("word<WH1><G5656>");
+        assert!(matches!(
+            mismatched.last(),
+            Some(Node::UnknownTag { name, .. }) if name == "G5656"
+        ));
+    }
+
+    #[test]
     fn last_word_is_selected_for_strong_when_text_has_multiple_words() {
         let nodes = tokenize_markup("one, two words<WG7>");
         assert!(matches!(
@@ -629,6 +734,10 @@ mod tests {
         insta::assert_debug_snapshot!(
             "synthetic_markup_strong_in_jesus_words",
             tokenize_markup("<FR>loved<Fr><WG25>")
+        );
+        insta::assert_debug_snapshot!(
+            "synthetic_markup_strong_grammar",
+            tokenize_markup("loved<WG25><G5656>")
         );
         insta::assert_debug_snapshot!(
             "synthetic_markup_nested_unknown_and_note",

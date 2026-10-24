@@ -243,7 +243,7 @@ As contagens de marcadores estruturais válidos, filtrando falsos positivos de `
 | `<H…>` | 70.887 | 134 |
 | **Total** | **440.208** | **14.292** |
 
-As formas `<TS…>`, `<CL>`, `<WT…>` e `<RX…>` não apareceram; permanecem **[VERIFICAR]**. O tokenizador percorreu os 31.102 versículos em 1,676 s release e produziu 99.267 `UnknownTag`: 28.360 ocorrências de formas `<G…>` (146 variantes), 70.887 de `<H…>` (134 variantes) e 20 ocorrências em 16 formas misturando texto e marcação. As formas `<G…>`/`<H…>` ainda não são interpretadas pelo tokenizador; não foi inferido seu significado. A investigação revelou e corrigiu a delimitação de propriedades em linhas de continuação iniciadas por `<`, que fazia o leitor incluir propriedades como versículos.
+As formas `<TS…>`, `<CL>`, `<WT…>` e `<RX…>` não apareceram; permanecem **[VERIFICAR]**. O tokenizador percorreu os 31.102 versículos em 1,676 s release e produziu 99.267 `UnknownTag`: 28.360 ocorrências de formas `<G…>` (146 variantes), 70.887 de `<H…>` (134 variantes) e 20 ocorrências em 16 formas misturando texto e marcação. A análise M1.3e abaixo passou a classificar `<G…>`/`<H…>` numéricas depois de Strong como `Grammar`; as demais formas, incluindo as 20 mistas, continuam desconhecidas. A investigação revelou e corrigiu a delimitação de propriedades em linhas de continuação iniciadas por `<`, que fazia o leitor incluir propriedades como versículos.
 
 #### VidaNova.cmt.twm — conteúdo RVF (M1.3d)
 
@@ -282,7 +282,7 @@ A leitura começou pela tabela `config`. Não há `do.encrypt`, `secure` ou `com
 | `content_search` | 110 | `topic_id INTEGER`, `data BLOB` |
 | `sqlite_sequence` | 1 | `name`, `seq` |
 
-O único `content_type` distinto em `bible_refs` é `rvf` (110 linhas); a configuração também declara `content.type=rvf`. Todos os 110 `content.data` são armazenados pelo SQLite como `TEXT`, embora seus bytes não sejam UTF-8 válido. Nenhuma entrada começa por `{\rtf` ou `<`: 0/110 RTF padrão, 0/110 com `<` e 110/110 com outro prefixo. O único formato observado tem 95 prefixos distintos nos primeiros 40 bytes; o prefixo estrutural comum, com os bytes de controle e o restante variável ocultados, é `-8 1 3\r\n-9 2 0 0 2 0 1\r\nrvsDyna\r\nB[controle…]`. Isso sustenta a identificação como formato próprio RVF, não como HTML ou texto simples.
+O único `content_type` distinto em `bible_refs` é `rvf` (110 linhas); a configuração também declara `content.type=rvf`. Todos os 110 `content.data` são armazenados pelo SQLite como `TEXT`, embora seus bytes não sejam UTF-8 válido. Nenhuma entrada começa por `{\rtf` ou `<`: 0/110 RTF padrão, 0/110 com `<` e 110/110 com outro prefixo. O único formato observado tem 95 prefixos distintos nos primeiros 40 bytes; o prefixo estrutural comum, com os bytes de controle e o restante variável ocultados, é `-8 1 3\r\n-9 2 0 0 2 0 1\r\n[palavra]\r\n[controle…]`. Isso sustenta a identificação como formato próprio RVF, não como HTML ou texto simples.
 
 Em bytes retornados pelo SQLite, `content.data` tem mínimo 1.385, mediana 80.981,5 e máximo 1.572.389 bytes (18.848.948 no total); `data2` é NULL em 110/110. O arquivo tem 45.006.848 bytes porque há também 14.614.854 bytes em `content_search.data`, 274.091 em `bible_link_search.data` e 10.164.593 no valor `config.about`. A soma desses campos é 43.902.486 bytes; o restante corresponde a páginas livres e estrutura SQLite (1.024 bytes/página, 43.952 páginas, 837 livres). O `length()` SQL para `content.data` não representa os bytes completos por causa de NULs embutidos.
 
@@ -310,7 +310,80 @@ Exemplos estruturais, com cada palavra substituída por `[palavra]`:
 | `<G…>` | `[palavra]<WG1080><G5656>` · `[palavra]<WG1080><G5681>` · `[palavra]<WG3004><G5746>` · `[palavra]<WG2258><G5713>` · `[palavra]<G5625>` |
 | `<H…>` | `[palavra]<WH1254><H8804>` · `[palavra]<WH1961><H8804>` · `[palavra]<WH7363><H8764>` · `[palavra]<WH559><H8799>` · `[palavra]<H8675>` |
 
-Os dados sustentam que `<G…>`/`<H…>` são marcadores adicionais associados sobretudo depois da palavra e frequentemente adjacentes a `<WG…>`/`<WH…>`, mas com números diferentes; há também formas sem o marcador `W`. Isso não sustenta tratá-los como aliases de Strong. **Proposta, não implementada:** manter `UnknownTag` e seu `raw` até que uma especificação ou evidência independente esclareça a semântica; não associar esses números a `Node::Strong` nem descartá-los. Seguem incertos o significado dos números, a relação entre as duas famílias e o tratamento correto das 20 formas mistas restantes.
+Registro histórico da M1.3d: com a evidência então disponível, a proposta era manter `<G…>`/`<H…>` como `UnknownTag`, sem associá-los a `Node::Strong` nem descartá-los. Essa proposta foi superada pela decisão M1.3e, após a comparação dos valores com as chaves do dicionário descrita abaixo. Seguem incertos o significado individual dos códigos, a relação semântica entre as famílias e o tratamento correto das 20 formas mistas restantes.
+
+#### M1.3e — códigos gramaticais, despacho RTF/RVF e amostras estruturais
+
+**Tags numéricas.** Contagens da Bíblia ARA+ por número; nenhum texto bíblico foi usado nos cálculos:
+
+| Família | Mínimo | Máximo | Números distintos | 10 valores mais frequentes (valor: ocorrências) |
+|---|---:|---:|---|---|
+| `<G…>` | 1063 | 5773 | 146 | 5719: 2989; 5723: 2450; 5656: 2289; 5627: 2065; 5748: 1586; 5631: 880; 5707: 849; 5692: 807; 5660: 708; 5721: 634 |
+| `<H…>` | 8675 | 8809 | 134 | 8799: 19804; 8804: 12486; 8802: 5338; 8800: 4846; 8686: 4018; 8798: 2844; 8689: 2651; 8762: 2436; 8765: 2109; 8735: 1600 |
+
+No dicionário Strong_AMG2, o maior `topics.subject` numérico é `G5624` e `H8674`. Acima dessas chaves estão 28.359/28.360 tags G (99,996%) e 70.887/70.887 tags H (100%); combinado, 99.246/99.247 (99,999%). A hipótese de códigos gramaticais passa o limiar de 95%. Isso é evidência numérica e posicional, não uma tabela de significados validada. Tags após Strong da mesma família viram `Node::Grammar { lang, code }`, anexado ao nó `Strong` imediatamente anterior; tag sem Strong anterior da mesma língua continua `UnknownTag`. Grammar não é `Link`, e fica fora de `plain_text`.
+
+Comparação numérica dos conjuntos `<WG…>` por referência entre ARA+ e KJV:
+
+| Referência | ARA distintos | KJV distintos | Interseção | União | Interseção/ARA | Jaccard (interseção/união) |
+|---|---:|---:|---:|---:|---:|---:|
+| João 1:1 | 7 | 7 | 7 | 7 | 100% | 100% |
+| João 3:16 | 21 | 20 | 20 | 21 | 95,2% | 95,2% |
+| Romanos 8:28 | 12 | 13 | 12 | 13 | 100% | 92,3% |
+
+Nenhum conteúdo de versículo foi impresso. Na execução integral da ARA+ após a mudança, restaram 24 `UnknownTag`: quatro tags G numéricas sem Strong grego imediatamente anterior e 20 formas mistas. Na execução integral da KJV restaram zero. As formas mistas não foram reinterpretadas.
+
+**Inventário `.twm` em `E:\coding\modulos-teste`.** Consultadas somente configurações antes de qualquer tabela de conteúdo. Os flags de proteção foram verificados antes do campo de formato; Mickelson permaneceu restrito à configuração.
+
+| Arquivo | `config.content.type` | Tipos por entrada |
+|---|---|---|
+| Holman-AT.cmt.twm | `rtf` | `bible_refs`: `rtf`, `rvf` |
+| Mickelson's Strong.dct.twm | ausente | não consultado (protegido) |
+| NICNT.cmt.twm | ausente | `bible_refs`: `rtf` |
+| Strong_AMG2.dct.twm | `rtf` | `topics`: `rtf` (14.167), `rvf` (32) |
+| VidaNova.cmt.twm | `rvf` | `bible_refs`: `rvf` |
+
+Entre os quatro módulos desprotegidos, `rvf` aparece em VidaNova (110 entradas), Strong_AMG2 (32 tópicos) e Holman (uma entrada); `config.content.type` não basta para escolher o conversor. Mickelson foi verificado somente na configuração e nenhum tipo por entrada foi consultado.
+
+**VidaNova RVF — amostras mascaradas.** Primeiros 60 bytes de cinco entradas distintas. Letras foram suprimidas como `[palavra]`, dígitos trocados por `x`, bytes de controle substituídos por `<ctrl>` e CR/LF representados como `\r`/`\n`; nenhum trecho literal de conteúdo é transcrito.
+
+| `topic_id` | Prefixo mascarado |
+|---:|---|
+| 1 | `-x x x\r\n-x x x x x x x\r\n[palavra]\r\n[palavra]<ctrl><ctrl><ctrl><ctrl><ctrl><ctrl>[palavra]<ctrl><ctrl>[palavra]<ctrl>[palavra]` |
+| 28 | `-x x x\r\n-x x x x x x x\r\n[palavra]\r\n&<ctrl><ctrl><ctrl><ctrl><ctrl><ctrl>[palavra]<ctrl><ctrl>[palavra]<ctrl>[palavra]` |
+| 59 | `-x x x\r\n-x x x x x x x\r\n[palavra]\r\n<ctrl><ctrl><ctrl><ctrl><ctrl><ctrl><ctrl>[palavra]<ctrl><ctrl>[palavra]<ctrl>[palavra]` |
+| 87 | `-x x x\r\n-x x x x x x x\r\n[palavra]\r\nx<ctrl><ctrl><ctrl><ctrl><ctrl><ctrl>[palavra]<ctrl><ctrl>[palavra]<ctrl>[palavra]` |
+| 114 | `-x x x\r\n-x x x x x x x\r\n[palavra]\r\nx<ctrl><ctrl><ctrl><ctrl><ctrl><ctrl>[palavra]<ctrl><ctrl>[palavra]<ctrl>[palavra]` |
+
+Frequências em todos os 110 valores de `content.data` (18.848.948 bytes):
+
+| Pontuação ASCII mais frequente | Contagem | Controles | Contagem |
+|---|---:|---|---:|
+| `)` | 201296 | NUL | 7292130 |
+| `-` | 189908 | LF | 183001 |
+| `.` | 137316 | CR | 177384 |
+| `,` | 78974 | OTHER control | 105980 |
+| `"` | 53143 | TAB | 11874 |
+| `:` | 47115 |  |  |
+| `/` | 34443 |  |  |
+| `(` | 29502 |  |  |
+| `_` | 29427 |  |  |
+| `|` | 26386 |  |  |
+
+**Referência pública consultada.** A documentação oficial de [RichView RVF](https://www.trichview.com/help/rvf_specification.html) descreve o formato RVF genérico; não é uma especificação do perfil de módulos theWord.
+- RVF é composto por registros com cabeçalho e strings/binary subsequentes; cabeçalhos incluem tipo, quantidade de strings, estilo de parágrafo, opções, modo de consulta e tag.
+- `-8` é o registro de versão; `-9` representa propriedades de documento.
+- A versão 1.3 é permitida pela especificação; 1.3.1+ altera detalhes de UTF-8 para tags/propriedades.
+- Dados binários são possíveis; em modo de consulta 1, itens externos podem exigir callback do aplicativo.
+- Leitores podem ignorar registros desconhecidos usando a quantidade de strings declarada; os comprimentos e delimitadores precisam ser respeitados.
+- O cabeçalho observado `-8 1 3` é compatível com RVF 1.3 e `-9 2 0 0 2 0 1` tem forma plausível de registro de propriedades; a correspondência de cada campo no perfil theWord ainda requer confirmação.
+
+**Proposta provisória e plano de teste (não implementado).**
+1. Tratar `content_type=rvf` como fluxo binário independente, sem UTF-8/RTF heurístico; limitar toda leitura ao slice de entrada e usar cursor com checagem de overflow.
+2. Validar `-8`/versão e ler registros até EOF; interpretar somente tipos documentados e variantes observadas, respeitando CRLF, contagem de strings e comprimentos binários.
+3. Preservar/ignorar tipos desconhecidos conforme contagem declarada; retornar `Corrupted` para cabeçalho, contagem ou registro truncado/inconsistente; nunca converter links em alvos sem reconhecer seu esquema.
+4. Fixtures sintéticas cobrem versão 1.3, campos, texto/Unicode, controles NUL/CR/LF, binários, registros desconhecidos, limites de tamanho, entradas vazias/truncadas e contagens malformadas.
+5. Propriedades aleatórias validam ausência de panic/overflow e consumo limitado; testes de saída verificam `plain_text` e links sem amostras protegidas. Comparação com arquivo real autorizado deve ser somente leitura e validar estrutura/contagens, não snapshots de texto.
 
 #### Contagens de palavras de controle nos comentários
 

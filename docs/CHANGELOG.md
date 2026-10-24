@@ -1,5 +1,13 @@
 # Changelog — RhemaStudio
 
+## [Complemento M1.3e] — 2026-10-24
+
+### Concluído
+- ARA+: `<G…>`/`<H…>` numéricas excedem os maiores Strong de cada língua em 99,999% combinado. Adicionado `Node::Grammar`, anexado ao Strong precedente correspondente, excluído de `plain_text` e distinto de links. Tokenização integral dos 31.102 versículos deixou 24 `UnknownTag` (4 G numéricas sem associação e 20 formas mistas).
+- Adicionado `decode_twm_content`: somente `rtf` despacha ao conversor; RVF e tipos desconhecidos retornam `UnsupportedContent`. Conversão RTF agora rejeita dados sem cabeçalho com erro tipado, em vez de devolver árvore vazia.
+- Inventário de cinco `.twm` em `E:\coding\modulos-teste`: RVF ocorre em VidaNova, 32 tópicos do Strong_AMG2 e uma referência Holman; Mickelson permaneceu apenas na configuração por proteção.
+- Documentada estrutura RVF com amostras mascaradas, distribuição de pontuação/controles, referência pública genérica TRichView e plano provisório. Parser RVF não implementado; M1.4 não iniciada.
+
 ## [Complemento M1.3d] — 2026-10-24
 
 ### Concluído
@@ -15,7 +23,7 @@
 - Verificados os cinco módulos solicitados somente pela tabela `config`; Mickelson foi classificado como protegido e não teve o conteúdo consultado.
 - Amostras release de Holman, NICNT, VidaNova e Strong_AMG2, com contagens de armazenamento, classificação RTF, controles desconhecidos, tempos e forma estrutural de G25 do AMG2 documentadas sem texto dos módulos.
 - ARA+: corrigido no leitor o limite de propriedades com continuação iniciada por `<`; 31.102 versículos e charset 0. As famílias `<TS>`, `<CL>`, `<WT…>` e `<RX…>` não apareceram, portanto continuam [VERIFICAR]. O leitor CLI passou a filtrar falsos positivos de tags originados por sinais `<` em texto.
-- ARA+ gerou 99.267 `UnknownTag`, principalmente códigos `<G…>`/`<H…>` ainda não interpretados. A análise M1.3d confirmou que os números pareados são diferentes, mas não estabeleceu a semântica. VidaNova tem 110 entradas RVF; a estrutura foi caracterizada sem decodificação.
+- ARA+ gerou 99.267 `UnknownTag`, principalmente códigos `<G…>`/`<H…>` ainda não interpretados. A análise M1.3d confirmou que os números pareados são diferentes; M1.3e documentou as estatísticas que sustentam códigos gramaticais e adicionou o nó correspondente. VidaNova tem 110 entradas RVF; a estrutura foi caracterizada sem parser.
 
 ## [M1.3c] — 2026-10-24
 

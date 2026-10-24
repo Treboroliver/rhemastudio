@@ -50,6 +50,9 @@ pub enum ModuleError {
     #[error("Formato de módulo não suportado: {0}")]
     UnsupportedFormat(String),
 
+    #[error("Formato de conteúdo não suportado: {0}")]
+    UnsupportedContent(String),
+
     #[error("Erro de E/S ao ler módulo: {0}")]
     Io(String),
 }

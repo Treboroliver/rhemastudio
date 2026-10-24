@@ -1,0 +1,19 @@
+---
+source: crates/rhema-twformat/src/markup.rs
+expression: "tokenize_markup(\"loved<WG25><G5656>\")"
+---
+[
+    Strong {
+        lang: Greek,
+        num: 25,
+        children: [
+            Text(
+                "loved",
+            ),
+            Grammar {
+                lang: Greek,
+                code: 5656,
+            },
+        ],
+    },
+]

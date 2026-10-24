@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use encoding_rs::{Encoding, UTF_8, WINDOWS_1252};
-use rhema_core::{LinkTarget, Node, VerseRange, VerseRef};
+use rhema_core::{LinkTarget, ModuleError, Node, VerseRange, VerseRef};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RtfStats {
@@ -11,7 +11,6 @@ pub struct RtfStats {
     pub unknown_destinations: BTreeMap<String, usize>,
     pub invalid_hex_escapes: usize,
     pub unknown_codepages: BTreeMap<String, usize>,
-    pub binary_input: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,22 +76,21 @@ impl Frame {
     }
 }
 
-/// Converte RTF ou bytes arbitrários em nós sem falhar.
-pub fn convert_rtf(input: &[u8]) -> Vec<Node> {
-    convert_rtf_with_stats(input).nodes
+/// Converte RTF em nós, rejeitando conteúdo que não tenha cabeçalho RTF.
+pub fn convert_rtf(input: &[u8]) -> Result<Vec<Node>, ModuleError> {
+    convert_rtf_with_stats(input).map(|conversion| conversion.nodes)
 }
 
 /// Converte RTF e devolve contagens de controles desconhecidos e destinos especiais.
-pub fn convert_rtf_with_stats(input: &[u8]) -> RtfConversion {
-    let binary_input = looks_binary(input);
-    if binary_input {
-        return RtfConversion {
-            nodes: Vec::new(),
-            stats: RtfStats {
-                binary_input: true,
-                ..RtfStats::default()
-            },
-        };
+pub fn convert_rtf_with_stats(input: &[u8]) -> Result<RtfConversion, ModuleError> {
+    let header_offset = input
+        .iter()
+        .position(|byte| !byte.is_ascii_whitespace())
+        .unwrap_or(input.len());
+    if !input[header_offset..].starts_with(b"{\\rtf") {
+        return Err(ModuleError::Corrupted(
+            "conteúdo declarado como RTF sem cabeçalho RTF".to_string(),
+        ));
     }
 
     let mut parser = Parser {
@@ -112,10 +110,10 @@ pub fn convert_rtf_with_stats(input: &[u8]) -> RtfConversion {
         }
         root = frame;
     }
-    RtfConversion {
+    Ok(RtfConversion {
         nodes: root.nodes,
         stats: parser.stats,
-    }
+    })
 }
 
 struct Parser<'a> {
@@ -561,25 +559,11 @@ fn encoding_for_codepage(codepage: u16) -> Option<&'static Encoding> {
     Encoding::for_label(label.as_bytes())
 }
 
-fn looks_binary(input: &[u8]) -> bool {
-    if input.is_empty() {
-        return false;
+pub fn decode_twm_content(content_type: &str, input: &[u8]) -> Result<Vec<Node>, ModuleError> {
+    match content_type {
+        "rtf" => convert_rtf(input),
+        other => Err(ModuleError::UnsupportedContent(other.to_string())),
     }
-    let starts_rtf = input
-        .iter()
-        .copied()
-        .skip_while(u8::is_ascii_whitespace)
-        .take(5)
-        .eq(b"{\\rtf".iter().copied());
-    if starts_rtf {
-        return false;
-    }
-    let sample = &input[..input.len().min(512)];
-    let controls = sample
-        .iter()
-        .filter(|&&byte| byte == 0 || (byte < 0x20 && !matches!(byte, b'\r' | b'\n' | b'\t')))
-        .count();
-    controls.saturating_mul(20) >= sample.len()
 }
 
 fn parse_link_target(instruction: &str) -> LinkTarget {
@@ -675,7 +659,8 @@ mod tests {
 
     #[test]
     fn converts_basic_formatting_and_breaks() {
-        let nodes = convert_rtf(br"{\rtf1 \b bold\b0  \i italics\i0  \ul underlined\ulnone  \super 2\nosupersub\par next\line line}");
+        let nodes = convert_rtf(br"{\rtf1 \b bold\b0  \i italics\i0  \ul underlined\ulnone  \super 2\nosupersub\par next\line line}")
+            .expect("entrada RTF sintética válida");
         assert_eq!(plain_text(&nodes), "bold italics underlined 2nextline");
         assert!(nodes.iter().any(|node| matches!(node, Node::Bold(_))));
         assert!(nodes.iter().any(|node| matches!(node, Node::Italic(_))));
@@ -689,9 +674,11 @@ mod tests {
 
     #[test]
     fn decodes_codepage_hex_and_unicode_fallback() {
-        let nodes = convert_rtf(br"{\rtf1\ansi\ansicpg1252 caf\'e9 \uc1\u233? \u-10179?\u-8704?}");
+        let nodes = convert_rtf(br"{\rtf1\ansi\ansicpg1252 caf\'e9 \uc1\u233? \u-10179?\u-8704?}")
+            .expect("entrada RTF sintética válida");
         assert_eq!(plain_text(&nodes), "café é 😀");
-        let ansi_zero = convert_rtf(br"{\rtf1\ansicpg0 \'e7 \'e3 \'e9 \'f5}");
+        let ansi_zero = convert_rtf(br"{\rtf1\ansicpg0 \'e7 \'e3 \'e9 \'f5}")
+            .expect("entrada RTF sintética válida");
         assert_eq!(plain_text(&ansi_zero), "ç ã é õ");
     }
 
@@ -699,7 +686,8 @@ mod tests {
     fn skips_known_and_unknown_destinations_and_counts_controls() {
         let output = convert_rtf_with_stats(
             br"{\rtf1 visible{\fonttbl hidden}{\colortbl hidden}{\*\private hidden}{\strangecontrol x}}",
-        );
+        )
+        .expect("entrada RTF sintética válida");
         assert_eq!(plain_text(&output.nodes), "visiblex");
         assert_eq!(output.stats.unknown_destinations.get("private"), Some(&1));
         assert_eq!(
@@ -713,7 +701,8 @@ mod tests {
     fn extracts_bible_hyperlink_field() {
         let nodes = convert_rtf(
             br#"{\rtf1{\field{\*\fldinst HYPERLINK "tw://bible.*?id=43.3.16|_AUTODETECT_|"}{\fldrslt John 3:16}}}"#,
-        );
+        )
+        .expect("entrada RTF sintética válida");
         assert!(matches!(
             &nodes[0],
             Node::Link {
@@ -727,7 +716,8 @@ mod tests {
     fn handles_rtf_binary_runs_and_dictionary_links() {
         let nodes = convert_rtf(
             br#"{\rtf1 before\bin3{x}after {\field{\*\fldinst HYPERLINK "_STRONG_G25|_NOLINK_"}{\fldrslt loved}}}"#,
-        );
+        )
+        .expect("entrada RTF sintética válida");
         assert_eq!(plain_text(&nodes), "beforeafter loved");
         assert!(nodes.iter().any(|node| matches!(
             node,
@@ -740,7 +730,8 @@ mod tests {
 
     #[test]
     fn preserves_caps_strikethrough_and_bullet_formatting() {
-        let nodes = convert_rtf(br"{\rtf1\caps caps\caps0|\strike struck\strike0|\bullet}");
+        let nodes = convert_rtf(br"{\rtf1\caps caps\caps0|\strike struck\strike0|\bullet}")
+            .expect("entrada RTF sintética válida");
         assert_eq!(plain_text(&nodes), "caps|struck|•");
         assert!(nodes.iter().any(|node| matches!(node, Node::Caps(_))));
         assert!(nodes
@@ -750,18 +741,29 @@ mod tests {
 
     #[test]
     fn malformed_groups_controls_and_binary_are_safe() {
-        assert_eq!(plain_text(&convert_rtf(b"{\\rtf1 open")), "open");
-        assert_eq!(plain_text(&convert_rtf(b"stray } brace")), "stray  brace");
-        assert!(convert_rtf(b"").is_empty());
-        let bad = convert_rtf_with_stats(b"{\\rtf1\\u-10179? caf\\'zz}");
+        assert_eq!(
+            plain_text(&convert_rtf(b"{\\rtf1 open").expect("RTF incompleto tolerado")),
+            "open"
+        );
+        assert!(matches!(
+            convert_rtf(b"stray } brace"),
+            Err(ModuleError::Corrupted(_))
+        ));
+        assert!(matches!(convert_rtf(b""), Err(ModuleError::Corrupted(_))));
+        let bad = convert_rtf_with_stats(b"{\\rtf1\\u-10179? caf\\'zz}")
+            .expect("RTF malformado tolerado");
         assert_eq!(plain_text(&bad.nodes), "\u{fffd} caf");
         assert_eq!(bad.stats.invalid_hex_escapes, 1);
-        assert!(convert_rtf(&[0, 255, 0, 42]).is_empty());
+        assert!(matches!(
+            convert_rtf(&[0, 255, 0, 42]),
+            Err(ModuleError::Corrupted(_))
+        ));
     }
 
     #[test]
     fn malformed_unicode_parameter_is_ignored() {
-        let output = convert_rtf_with_stats(br"{\rtf1\u?}");
+        let output =
+            convert_rtf_with_stats(br"{\rtf1\u?}").expect("RTF com controle inválido tolerado");
         assert_eq!(plain_text(&output.nodes), "?");
         assert_eq!(output.stats.unknown_controls.get("u"), Some(&1));
     }
@@ -771,13 +773,33 @@ mod tests {
         insta::assert_debug_snapshot!(
             "synthetic_rtf_nested_formatting",
             convert_rtf(br"{\rtf1 before {\b bold {\i nested}} after\par end}")
+                .expect("RTF sintético válido")
         );
         insta::assert_debug_snapshot!(
             "synthetic_rtf_unicode_and_link",
             convert_rtf(
                 br#"{\rtf1\uc1\u233? {\field{\*\fldinst HYPERLINK "tw://bible.*?id=43.3.16|_AUTODETECT_|"}{\fldrslt John 3:16}}}"#
             )
+            .expect("RTF sintético válido")
         );
+    }
+
+    #[test]
+    fn dispatches_twm_content_by_declared_type() {
+        let nodes = decode_twm_content("rtf", br"{\rtf1 decoded}").expect("RTF suportado");
+        assert_eq!(plain_text(&nodes), "decoded");
+        assert!(matches!(
+            decode_twm_content("rvf", b"not decoded"),
+            Err(ModuleError::UnsupportedContent(kind)) if kind == "rvf"
+        ));
+        assert!(matches!(
+            decode_twm_content("custom", b"not decoded"),
+            Err(ModuleError::UnsupportedContent(kind)) if kind == "custom"
+        ));
+        assert!(matches!(
+            decode_twm_content("rtf", b"not RTF"),
+            Err(ModuleError::Corrupted(_))
+        ));
     }
 
     #[test]
@@ -884,13 +906,19 @@ mod tests {
                 };
                 if raw.starts_with(b"{\\rtf") {
                     rtf_entries += 1;
-                }
+                };
                 let conversion_started = Instant::now();
-                let converted = convert_rtf_with_stats(&raw);
+                let converted = match convert_rtf_with_stats(&raw) {
+                    Ok(converted) => converted,
+                    Err(_) => {
+                        conversion_duration += conversion_started.elapsed();
+                        binary_entries += 1;
+                        next_sample += 1;
+                        row_index += 1;
+                        continue;
+                    }
+                };
                 conversion_duration += conversion_started.elapsed();
-                if converted.stats.binary_input {
-                    binary_entries += 1;
-                }
                 merge_counts(&mut control_words, converted.stats.control_words);
                 merge_counts(&mut unknown_controls, converted.stats.unknown_controls);
                 merge_counts(&mut destinations, converted.stats.destinations);
@@ -994,7 +1022,13 @@ mod tests {
         });
         match result {
             Ok(raw) => {
-                let nodes = convert_rtf(&raw);
+                let nodes = match convert_rtf(&raw) {
+                    Ok(nodes) => nodes,
+                    Err(error) => {
+                        eprintln!("Strong_AMG2 G25: conteúdo RTF inválido: {error}");
+                        return;
+                    }
+                };
                 let mut shape = BTreeMap::new();
                 collect_node_shapes(&nodes, &mut shape);
                 let mut links = BTreeMap::new();
@@ -1026,6 +1060,7 @@ mod tests {
                 Node::OtQuote(nodes) => ("OtQuote", Some(nodes)),
                 Node::Heading(_, nodes) => ("Heading", Some(nodes)),
                 Node::Strong { children, .. } => ("Strong", Some(children)),
+                Node::Grammar { .. } => ("Grammar", None),
                 Node::Morph(_) => ("Morph", None),
                 Node::Note(nodes) => ("Note", Some(nodes)),
                 Node::XRef(_) => ("XRef", None),
@@ -1087,8 +1122,12 @@ mod tests {
     proptest! {
         #[test]
         fn arbitrary_bytes_never_panic_or_hang(input in prop::collection::vec(any::<u8>(), 0..4096)) {
-            let output = convert_rtf_with_stats(&input);
-            prop_assert!(output.nodes.len() <= input.len().saturating_mul(2).saturating_add(1));
+            let mut rtf = b"{\\rtf1".to_vec();
+            rtf.extend(input);
+            rtf.push(b'}');
+            let output = convert_rtf_with_stats(&rtf);
+            prop_assert!(output.is_ok());
+            prop_assert!(output.unwrap().nodes.len() <= rtf.len().saturating_mul(2).saturating_add(1));
         }
 
     }

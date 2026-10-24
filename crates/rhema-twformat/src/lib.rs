@@ -8,7 +8,7 @@ pub use bible_reader::{BibleScope, OntReader};
 pub use detect::{detect_signature, ModuleSignature, SQLITE_MAGIC, TW_ENCRYPTED_MAGIC};
 pub use markup::{plain_text, tokenize_markup};
 pub use protection::ensure_twm_unprotected;
-pub use rtf::{convert_rtf, convert_rtf_with_stats, RtfConversion, RtfStats};
+pub use rtf::{convert_rtf, convert_rtf_with_stats, decode_twm_content, RtfConversion, RtfStats};
 
 #[cfg(test)]
 mod tests {

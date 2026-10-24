@@ -33,6 +33,10 @@ pub enum Node {
         num: u32,
         children: Vec<Node>,
     },
+    Grammar {
+        lang: StrongLang,
+        code: u32,
+    },
     Morph(String),
     Note(Vec<Node>),
     XRef(VerseRange),
@@ -83,7 +87,11 @@ impl Node {
                 }
             }
             Node::Note(_) => {}
-            Node::Paragraph | Node::LineBreak | Node::Morph(_) | Node::XRef(_) => {}
+            Node::Grammar { .. }
+            | Node::Paragraph
+            | Node::LineBreak
+            | Node::Morph(_)
+            | Node::XRef(_) => {}
         }
     }
 }
