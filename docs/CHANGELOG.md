@@ -8,13 +8,14 @@
   - Detecção rigorosa de assinatura binária de DRM (`TWENCBMOD`) retornando o erro tipado `ModuleError::EncryptedModule`.
   - Delimitação robusta entre versículos e bloco de propriedades ao final do arquivo, suportando comentários (`#`), linhas de continuação de texto e propriedades `chave=valor`.
   - Resolução de codificação baseada na propriedade `charset` (`0` para Windows-1252, `65001` para UTF-8) com fallback seguro.
+  - Charset ausente ou desconhecido agora valida UTF-8 antes do fallback Windows-1252 e registra o charset selecionado; coberto por fixtures sintéticas.
   - Suporte completo aos escopos `Full` (31.102 versículos), `OldTestament` (23.145 versículos) e `NewTestament` (7.957 versículos), com abertura em modo degradado para módulos de contagem não canônica (sem pânico).
   - APIs de leitura `info()`, `verse(book, chapter, verse)`, `chapter(book, chapter)` e `line_by_index(idx)`.
 - Novo comando `rhema-cli dump <arquivo> --book <N> --chapter <C> --verse <V>` para exibição de versículos brutos com tags.
 - Suíte abrangente de testes:
   - Testes unitários com geradores sintéticos em `tools/gen-fixtures` cobrindo Bíblias completas, AT, NT, módulos degradados e arquivos truncados/vazios.
   - Testes de propriedade com `proptest` para resiliência a bytes arbitrários e contagens aleatórias de linhas.
-  - Teste de integração e benchmark de performance com módulo real `kjv.ont` via `RHEMA_TEST_MODULES`: abertura em ~26-40 ms (orçamento < 200 ms) e leitura de capítulo em < 1 ms (orçamento < 30 ms).
+  - Benchmark release com módulo real `kjv.ont`: primeira abertura medida em 65,3 ms (cache frio aproximado), reabertura em 7,4 ms (cache quente) e leitura de João 3 em 70,9 µs. O orçamento de 200 ms aplica-se à abertura com cache quente; o sistema operacional não permite garantir cache frio neste teste.
 
 ---
 

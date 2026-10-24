@@ -8,6 +8,7 @@ pub use detect::{detect_signature, ModuleSignature, SQLITE_MAGIC, TW_ENCRYPTED_M
 mod tests {
     use super::*;
     use rhema_core::{Book, ModuleError};
+    use std::io::Write;
     use tempfile::NamedTempFile;
 
     #[test]
@@ -136,5 +137,43 @@ mod tests {
         // João 3:37 não existe (capítulo 3 tem 36 versículos)
         let res = reader.verse(Book::John, 3, 37);
         assert!(matches!(res, Err(ModuleError::VerseNotFound(_))));
+    }
+
+    #[test]
+    fn test_unknown_charset_falls_back_to_utf8_then_windows_1252() {
+        let mut utf8_file = NamedTempFile::new().unwrap();
+        utf8_file
+            .write_all("Texto com café\r\n\r\ncharset=9999\r\n".as_bytes())
+            .unwrap();
+        let utf8_reader = OntReader::open(utf8_file.path()).unwrap();
+        assert_eq!(utf8_reader.encoding_name(), "UTF-8");
+        assert_eq!(utf8_reader.line_by_index(0).unwrap(), "Texto com café");
+
+        let mut windows_file = NamedTempFile::new().unwrap();
+        windows_file
+            .write_all(b"Texto com caf\xe9\r\n\r\ncharset=9999\r\n")
+            .unwrap();
+        let windows_reader = OntReader::open(windows_file.path()).unwrap();
+        assert_eq!(windows_reader.encoding_name(), "windows-1252");
+        assert_eq!(windows_reader.line_by_index(0).unwrap(), "Texto com café");
+
+        let mut absent_file = NamedTempFile::new().unwrap();
+        absent_file
+            .write_all("Texto UTF-8 sem propriedade\r\n\r\n".as_bytes())
+            .unwrap();
+        let absent_reader = OntReader::open(absent_file.path()).unwrap();
+        assert_eq!(absent_reader.encoding_name(), "UTF-8");
+    }
+
+    #[test]
+    fn test_synthetic_windows_1252_accented_verse() {
+        let mut temp = NamedTempFile::new().unwrap();
+        temp.write_all(b"Jo 3:16: a\xe7\xe3o, caf\xe9, p\xf5e\r\n\r\ncharset=0\r\n")
+            .unwrap();
+
+        let reader = OntReader::open(temp.path()).unwrap();
+
+        assert_eq!(reader.encoding_name(), "windows-1252");
+        assert_eq!(reader.line_by_index(0).unwrap(), "Jo 3:16: ação, café, põe");
     }
 }

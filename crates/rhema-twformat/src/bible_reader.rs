@@ -126,7 +126,7 @@ impl OntReader {
 
         // 4. Detecção de Codificação a partir da propriedade charset (ou fallback)
         let raw_props_map = parse_raw_ascii_properties(bytes, prop_lines);
-        let encoding = resolve_encoding(&raw_props_map);
+        let encoding = resolve_encoding(&raw_props_map, bytes);
 
         // 5. Decodificação Completa das Propriedades
         let properties = decode_properties(bytes, prop_lines, encoding);
@@ -399,27 +399,38 @@ fn parse_raw_ascii_properties(
 }
 
 /// Determina a codificação a partir da propriedade `charset`
-fn resolve_encoding(props: &HashMap<String, String>) -> &'static encoding_rs::Encoding {
+fn resolve_encoding(
+    props: &HashMap<String, String>,
+    bytes: &[u8],
+) -> &'static encoding_rs::Encoding {
     if let Some(charset_str) = props.get("charset") {
-        let c = charset_str.trim().to_ascii_lowercase();
-        match c.as_str() {
+        let charset = charset_str.trim().to_ascii_lowercase();
+        match charset.as_str() {
             "0" | "1252" => return encoding_rs::WINDOWS_1252,
             "65001" | "utf-8" | "utf8" => return encoding_rs::UTF_8,
             "1250" => return encoding_rs::WINDOWS_1250,
             "1251" => return encoding_rs::WINDOWS_1251,
             "1253" => return encoding_rs::WINDOWS_1253,
             "1255" => return encoding_rs::WINDOWS_1255,
-            other => {
-                tracing::warn!(
-                    "Propriedade charset '{}' não mapeada diretamente; tentando UTF-8 com fallback para Windows-1252",
-                    other
-                );
-            }
+            _ => {}
         }
     }
 
-    // Padrão do formato theWord (historicamente Windows-1252)
-    encoding_rs::WINDOWS_1252
+    let encoding = if std::str::from_utf8(bytes).is_ok() {
+        encoding_rs::UTF_8
+    } else {
+        encoding_rs::WINDOWS_1252
+    };
+    let charset = props
+        .get("charset")
+        .map(String::as_str)
+        .unwrap_or("ausente");
+    tracing::warn!(
+        "Charset '{}' ausente ou desconhecido; fallback selecionado: {}",
+        charset,
+        encoding.name()
+    );
+    encoding
 }
 
 /// Decodifica completamente o bloco de propriedades com o charset especificado
