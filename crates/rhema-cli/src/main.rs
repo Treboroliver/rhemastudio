@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, HashMap};
-use std::fs::File;
+use std::fs::{create_dir, write, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -54,6 +55,16 @@ enum Commands {
         #[arg(long)]
         plain: bool,
     },
+
+    /// Grava amostras distribuídas do conteúdo RTF de um módulo SQLite em pasta temporária
+    RtfSample {
+        /// Caminho para arquivo de módulo SQLite (.twm)
+        file: PathBuf,
+
+        /// Quantidade de linhas amostradas entre início, meio e fim da tabela
+        #[arg(long, default_value_t = 10)]
+        count: usize,
+    },
 }
 
 fn main() -> Result<()> {
@@ -69,7 +80,160 @@ fn main() -> Result<()> {
             parsed,
             plain,
         } => dump_verse(&file, book, chapter, verse, parsed, plain),
+        Commands::RtfSample { file, count } => rtf_sample(&file, count),
     }
+}
+
+fn rtf_sample(path: &Path, count: usize) -> Result<()> {
+    if count == 0 {
+        bail!("--count deve ser maior que zero");
+    }
+    if !path.exists() {
+        bail!("Arquivo não encontrado: {}", path.display());
+    }
+    let conn = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .with_context(|| {
+        format!(
+            "Falha ao abrir SQLite somente para leitura: {}",
+            path.display()
+        )
+    })?;
+    let row_count: i64 = conn
+        .query_row("SELECT count(*) FROM content", [], |row| row.get(0))
+        .with_context(|| "Tabela content não encontrada ou inválida")?;
+    if row_count == 0 {
+        bail!("A tabela content não contém linhas para amostrar");
+    }
+
+    let output_dir = create_sample_directory()?;
+    let mut statement =
+        conn.prepare("SELECT topic_id, data, data2 FROM content ORDER BY topic_id")?;
+    let mut rows = statement.query([])?;
+    let sample_count = count.min(row_count as usize);
+    let sample_offsets = (0..sample_count)
+        .map(|index| {
+            if sample_count <= 1 {
+                0
+            } else {
+                index * (row_count as usize - 1) / (sample_count - 1)
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut next_sample = 0usize;
+    let mut row_index = 0usize;
+    let mut written = 0usize;
+    let mut selected_samples = Vec::new();
+    let mut binary_blobs = 0usize;
+    let mut binary_bytes = 0usize;
+    let mut binary_examples = Vec::new();
+
+    while let Some(row) = rows.next()? {
+        if sample_offsets.get(next_sample) != Some(&row_index) {
+            row_index += 1;
+            continue;
+        }
+        let topic_id = row.get::<_, i64>(0)?;
+        let data = row.get::<_, rusqlite::types::Value>(1)?;
+        let data2 = row.get::<_, rusqlite::types::Value>(2)?;
+        for (column, value) in [("data", data), ("data2", data2)] {
+            match value {
+                rusqlite::types::Value::Null => {}
+                rusqlite::types::Value::Text(text) => {
+                    let extension = if looks_like_rtf(text.as_bytes()) {
+                        "rtf"
+                    } else {
+                        "txt"
+                    };
+                    let filename = format!("{topic_id}_{column}.{extension}");
+                    write(output_dir.join(&filename), text.as_bytes())?;
+                    written += 1;
+                    selected_samples.push(filename);
+                }
+                rusqlite::types::Value::Blob(bytes) if looks_like_rtf(&bytes) => {
+                    let filename = format!("{topic_id}_{column}.rtf");
+                    write(output_dir.join(&filename), &bytes)?;
+                    written += 1;
+                    selected_samples.push(filename);
+                }
+                rusqlite::types::Value::Blob(bytes) => {
+                    binary_blobs += 1;
+                    binary_bytes += bytes.len();
+                    if binary_examples.len() < 3 {
+                        let hex = bytes
+                            .iter()
+                            .take(32)
+                            .map(|byte| format!("{byte:02X}"))
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        binary_examples.push(format!(
+                            "topic_id={topic_id} {column}: {} bytes, início em hex: {hex}",
+                            bytes.len()
+                        ));
+                    }
+                }
+                value => println!("topic_id={topic_id} {column}: {value:?}"),
+            }
+        }
+        next_sample += 1;
+        row_index += 1;
+    }
+    if next_sample != sample_count {
+        bail!("A amostragem de conteúdo terminou antes de alcançar as linhas esperadas");
+    }
+
+    println!(
+        "Amostradas {} linhas de {}; {} amostras de texto gravadas em {}",
+        sample_count,
+        row_count,
+        written,
+        output_dir.display()
+    );
+    println!("BLOBs binários não gravados: {binary_blobs} ({binary_bytes} bytes)");
+    for example in binary_examples {
+        println!("{example}");
+    }
+    for filename in selected_samples.iter().take(2) {
+        println!("Exemplo: {}", output_dir.join(filename).display());
+    }
+    if let Some(filename) = selected_samples.get(selected_samples.len() / 2) {
+        println!("Exemplo central: {}", output_dir.join(filename).display());
+    }
+    if let Some(filename) = selected_samples.last() {
+        println!("Exemplo final: {}", output_dir.join(filename).display());
+    }
+    Ok(())
+}
+
+fn looks_like_rtf(bytes: &[u8]) -> bool {
+    bytes
+        .iter()
+        .copied()
+        .skip_while(u8::is_ascii_whitespace)
+        .take(5)
+        .eq(b"{\\rtf".iter().copied())
+}
+
+fn create_sample_directory() -> Result<PathBuf> {
+    let temp_root = std::env::temp_dir();
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("Relógio do sistema anterior à época Unix")?
+        .as_millis();
+    for attempt in 0..100 {
+        let path = temp_root.join(format!(
+            "rhemastudio-rtf-samples-{}-{timestamp}-{attempt}",
+            std::process::id()
+        ));
+        match create_dir(&path) {
+            Ok(()) => return Ok(path),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    bail!("Não foi possível criar pasta temporária exclusiva para amostras RTF")
 }
 
 fn dump_verse(

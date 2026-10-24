@@ -19,8 +19,9 @@ Marque `[x]` ao concluir. Cada milestone só termina quando **todos** os critér
 - [x] M1.1 **Investigação com módulos reais:** `rhema-cli inspect` (SQLite e `.ont`); preencher `docs/02-apendice-schemas.md` e fechar todos os itens `[VERIFICAR]` de `docs/02-formato-theword.md`
 - [x] M1.2 Leitor `.ont/.ot/.nt` com `memmap2` + índice de offsets + propriedades
 - [x] M1.3 Tokenizador de marcação → `Vec<Node>` (tolerante, com `UnknownTag`)
-- [ ] M1.3b Conversor de RTF para `Vec<Node>`
-- [ ] M1.4 Leitores `.twm`: comentário, dicionário, livro (conforme schemas reais; conteúdo dos `.twm` vem em RTF)
+- [x] M1.3b Conversor tolerante de RTF para `Vec<Node>`, com `plain_text`, hyperlinks, controles desconhecidos contados e amostras reais condicionadas a `RHEMA_TEST_MODULES`
+- [ ] M1.4 Leitores `.twm`: comentário, dicionário, livro, conforme os schemas e formatos efetivamente observados
+  - Nota da M1.3b: comentários Holman/NICNT têm RTF textual; o `content.data` do dicionário Mickelson é BLOB opaco, sem codec identificado. O leitor deve respeitar `content_type` e não presumir que todo conteúdo `.twm` seja RTF. RVF/BLOBs não são decodificados nesta tarefa.
 - [ ] M1.5 Gerador de fixtures sintéticas para cada tipo
 - [ ] M1.6 Testes `proptest` do tokenizador + snapshots `insta`
 

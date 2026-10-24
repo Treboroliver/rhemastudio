@@ -1,0 +1,34 @@
+---
+source: crates/rhema-twformat/src/rtf.rs
+expression: "convert_rtf(br\"{\\rtf1 before {\\b bold {\\i nested}} after\\par end}\")"
+---
+[
+    Text(
+        "before ",
+    ),
+    Bold(
+        [
+            Text(
+                "bold ",
+            ),
+        ],
+    ),
+    Bold(
+        [
+            Italic(
+                [
+                    Text(
+                        "nested",
+                    ),
+                ],
+            ),
+        ],
+    ),
+    Text(
+        " after",
+    ),
+    Paragraph,
+    Text(
+        "end",
+    ),
+]

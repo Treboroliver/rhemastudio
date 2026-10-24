@@ -1,6 +1,6 @@
 # 02 — Formato dos módulos theWord
 
-> **Status do documento:** Especificação refinada e validada contra módulos reais na tarefa **M1.1**. O apêndice detalhado de schemas e DDLs reais encontra-se em `docs/02-apendice-schemas.md`.
+> **Status do documento:** Especificação refinada nas tarefas **M1.1** e **M1.3b**, com schemas e RTF conferidos em módulos reais. O apêndice detalhado encontra-se em `docs/02-apendice-schemas.md`.
 
 ## 1. Famílias de módulos
 
@@ -9,15 +9,15 @@
 | `.ont` | Bíblia completa (AT + NT) | Texto simples + tags + propriedades no fim | Confirmado (31.102 versículos) |
 | `.ot` | Somente Antigo Testamento | idem | Confirmado (23.145 versículos) |
 | `.nt` | Somente Novo Testamento | idem | Confirmado (7.957 versículos) |
-| `.cmt.twm` | Comentário (ligado a versículo, faixa, capítulo ou livro) | SQLite | Confirmado (tabelas `bible_refs`, `content`, `config`) |
+| `.cmt.twm` | Comentário (ligado a versículo, faixa, capítulo ou livro) | SQLite; conteúdo RTF em texto | Confirmado em Holman e NICNT |
 | `.gbk.twm` | Livro geral (capítulos/seções) | SQLite | Confirmado (SQLite) |
-| `.dct.twm` | Dicionário / léxico (ex.: Strong) | SQLite | Confirmado (tabelas `topics`, `content`, `config`) |
+| `.dct.twm` | Dicionário / léxico (ex.: Strong) | SQLite; `content.data` pode ser BLOB opaco | Schema confirmado; codec dos BLOBs Mickelson não identificado |
 | `.dev.twm` | Devocional diário | SQLite | Confirmado (extensão) |
 | `.gbk.twm` híbrido | Livro com ligações a versículos (como comentário) | SQLite | Confirmado (conceito) |
 | `.ontx` / `.twmx` | Módulos Encriptados (DRM) | Binário proprietário (Magic: `TWENCBMOD`) | Não suportado (rejeição com aviso) |
 | Outros `.twm` | Mapas, imagens, etc. | SQLite | Fora do MVP |
 
-Todo `.twm` é um **banco SQLite**. Módulos com sufixo `x` (`.ontx`, `.twmx`) possuem assinatura `TWENCBMOD` e são encriptados por DRM proprietário; são ignorados com aviso amigável.
+Todo `.twm` inspecionado é um **banco SQLite**, mas o tipo e a codificação de `content.data` variam por módulo. Não presuma que todo conteúdo seja RTF. Módulos com sufixo `x` (`.ontx`, `.twmx`) possuem assinatura `TWENCBMOD` e são encriptados por DRM proprietário; são ignorados com aviso amigável. Nunca descriptografar nem tentar contornar proteção.
 
 Locais comuns no Windows: `C:\ProgramData\The Word\` (subpastas de Bíblias e Livros). Permitir ao usuário escolher outras pastas; em Linux/macOS, sempre perguntar a pasta.
 
@@ -85,6 +85,15 @@ O resultado das inspeções é colado em `docs/02-apendice-schemas.md` (um bloco
 - **Devocional (`dev`):** entradas por data (dia/mês).
 - Conteúdo textual pode conter marcação própria (links, formatação). Mesmo tokenizador tolerante; se o formato diferir, criar módulo `markup_twm` separado.
 
+### Conversão RTF confirmada na M1.3b
+- Nos comentários Holman-AT e NICNT, `content.data` contém RTF textual, normalmente iniciado por `{\rtf1`; o conteúdo não estava comprimido nas amostras.
+- A codificação declarada é `\ansicpg0` (Windows-1252). `\'hh` representa bytes nessa página de códigos; `\uN` contém unidades UTF-16 assinadas e `\ucN` informa quantos caracteres de fallback ignorar.
+- Grupos `fonttbl`, `colortbl`, `stylesheet`, `pict` e o destino `notvatxbx` são ignorados. Campos de link aparecem como `\field`, `\fldinst` e `\fldrslt`; o destino bíblico observado usa `tw://bible.*?id=...|_AUTODETECT_|`. No NICNT há milhares de links bíblicos; não foi encontrado link de dicionário nos três módulos amostrados.
+- Grego e hebraico visíveis no NICNT são representados por `\uN`/`\ucN` e decodificados como Unicode. A amostra release de 2.000 entradas continha 117.089 caracteres gregos e 1.186 hebraicos. Não inferir uma codificação de idioma a partir de `fcharset` sem evidência adicional.
+- Os BLOBs de `Mickelson's Strong.dct.twm` não têm cabeçalho RTF nem formato/compressão identificados; 2.000/2.000 amostras foram classificadas como binárias e ignoradas pelo conversor. Não tentar descompactá-las ou descriptografá-las. O leitor de RVF/esses BLOBs está fora da M1.3b.
+- Nos textos RTF, `\par` e `\line` produzem nós estruturais; formatação conhecida inclui negrito, itálico, sublinhado, tachado, caixa alta e sobrescrito/subscrito. `plain_text` ignora notas/metadados e mantém o comportamento do tokenizador M1.3.
+- A forma de hiperlink para entradas do dicionário não foi confirmada em conteúdo RTF real; `LinkTarget::Dictionary` é aceito pelo conversor, mas permanece sem validação real.
+
 ## 4. Strong e léxico
 - Bíblia com Strong: tags `<WG…>`/`<WH…>`.
 - Clique no número → consulta ao dicionário configurado como "léxico padrão" para o idioma (`G25` → entrada).
@@ -110,6 +119,12 @@ pub struct ModuleInfo {
 pub enum Node {
     Text(String),
     Italic(Vec<Node>),
+    Bold(Vec<Node>),
+    Underline(Vec<Node>),
+    Strikethrough(Vec<Node>),
+    Caps(Vec<Node>),
+    Superscript(Vec<Node>),
+    Subscript(Vec<Node>),
     WordsOfJesus(Vec<Node>),
     OtQuote(Vec<Node>),
     Heading(u8, Vec<Node>),
@@ -117,9 +132,16 @@ pub enum Node {
     Morph(String),
     Note(Vec<Node>),
     XRef(VerseRange),
+    Link { target: LinkTarget, children: Vec<Node> },
     Paragraph,
     LineBreak,
     UnknownTag { name: String, raw: String, children: Vec<Node> },
+}
+
+pub enum LinkTarget {
+    Bible(VerseRange),
+    Dictionary(String),
+    Other(String),
 }
 
 pub trait BibleSource {

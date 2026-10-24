@@ -16,3 +16,4 @@ proptest = "1.6"
 tempfile = "3.17"
 gen-fixtures = { path = "../../tools/gen-fixtures" }
 insta = "1.43"
+rusqlite = { version = "0.33", features = ["bundled"] }

@@ -1,0 +1,33 @@
+---
+source: crates/rhema-twformat/src/rtf.rs
+expression: "convert_rtf(br#\"{\\rtf1\\uc1\\u233? {\\field{\\*\\fldinst HYPERLINK \"tw://bible.*?id=43.3.16|_AUTODETECT_|\"}{\\fldrslt John 3:16}}}\"#)"
+---
+[
+    Text(
+        "é",
+    ),
+    Text(
+        " ",
+    ),
+    Link {
+        target: Bible(
+            VerseRange {
+                start: VerseRef {
+                    book: John,
+                    chapter: 3,
+                    verse: 16,
+                },
+                end: VerseRef {
+                    book: John,
+                    chapter: 3,
+                    verse: 16,
+                },
+            },
+        ),
+        children: [
+            Text(
+                "John 3:16",
+            ),
+        ],
+    },
+]

@@ -1,5 +1,16 @@
 # Changelog — RhemaStudio
 
+## [M1.3b] — 2026-10-24
+
+### Concluído
+- Conversor iterativo e tolerante de RTF para `Vec<Node>` em `rhema-twformat`, com grupos aninhados, escapes `\'hh` conforme `\ansicpg`, `\uN`/`\ucN`, sequências binárias `\binN`, formatação, quebras, campos de hiperlink, destinos especiais e contagem de controles/destinos desconhecidos.
+- `Node` ampliado com negrito, sublinhado, tachado, caixa alta, sobrescrito, subscrito e links tipados para Bíblia/dicionário/outros; `plain_text` segue removendo notas e metadados estruturais.
+- Novo `rhema-cli rtf-sample <arquivo.twm> --count N`: amostragem uniforme em modo SQLite somente leitura, grava texto em diretório temporário e limita a três prefixos hex para BLOBs.
+- Cobertura sintética unitária, snapshots `insta` e `proptest` com bytes arbitrários; teste opcional lê 2.000 linhas distribuídas de cada arquivo quando `RHEMA_TEST_MODULES` está configurada.
+- Amostra release: Mickelson 2.000/2.000 BLOBs não RTF (0,025 ms/entrada para classificar); Holman 0 controles/destinos desconhecidos, 0 texto residual com `\`/`{` (0,746 ms/entrada); NICNT 0 desconhecidos, 1 texto com `\` e 3 com chaves, correspondendo a escapes literais na origem (1,262 ms/entrada).
+- Links bíblicos identificados na amostra release: 2.164 Holman e 59.658 NICNT; destinos `tw://` não classificados preservados como `Other` (25 e 1.239, respectivamente). Não foi encontrado link real de dicionário.
+- Schemas, tipos de armazenamento, contagens de controles RTF, codificação e limites dos BLOBs registrados em `docs/02-apendice-schemas.md`. Nenhum conteúdo de módulo real foi copiado para a documentação ou fixtures.
+
 ## [M1.3] — 2026-10-24
 
 ### Concluído

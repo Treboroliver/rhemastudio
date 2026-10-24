@@ -395,12 +395,19 @@ fn attach_strong_to_nodes(nodes: &mut Vec<Node>, lang: StrongLang, num: u32) -> 
                 return true;
             }
             Node::Italic(children)
+            | Node::Bold(children)
+            | Node::Underline(children)
+            | Node::Strikethrough(children)
+            | Node::Caps(children)
+            | Node::Superscript(children)
+            | Node::Subscript(children)
             | Node::WordsOfJesus(children)
             | Node::OtQuote(children)
             | Node::Heading(_, children)
             | Node::Strong { children, .. }
             | Node::Note(children)
-            | Node::UnknownTag { children, .. } => {
+            | Node::UnknownTag { children, .. }
+            | Node::Link { children, .. } => {
                 if attach_strong_to_nodes(children, lang, num) {
                     return true;
                 }
@@ -437,12 +444,19 @@ mod tests {
             match node {
                 Node::Text(text) => output.push_str(text),
                 Node::Italic(children)
+                | Node::Bold(children)
+                | Node::Underline(children)
+                | Node::Strikethrough(children)
+                | Node::Caps(children)
+                | Node::Superscript(children)
+                | Node::Subscript(children)
                 | Node::WordsOfJesus(children)
                 | Node::OtQuote(children)
                 | Node::Heading(_, children)
                 | Node::Strong { children, .. }
                 | Node::Note(children)
-                | Node::UnknownTag { children, .. } => output.push_str(&visible_text(children)),
+                | Node::UnknownTag { children, .. }
+                | Node::Link { children, .. } => output.push_str(&visible_text(children)),
                 Node::Paragraph | Node::LineBreak | Node::Morph(_) | Node::XRef(_) => {}
             }
         }
@@ -455,12 +469,19 @@ mod tests {
             .map(|node| match node {
                 Node::Text(_) => 1,
                 Node::Italic(children)
+                | Node::Bold(children)
+                | Node::Underline(children)
+                | Node::Strikethrough(children)
+                | Node::Caps(children)
+                | Node::Superscript(children)
+                | Node::Subscript(children)
                 | Node::WordsOfJesus(children)
                 | Node::OtQuote(children)
                 | Node::Heading(_, children)
                 | Node::Strong { children, .. }
                 | Node::Note(children)
-                | Node::UnknownTag { children, .. } => count_text_nodes(children),
+                | Node::UnknownTag { children, .. }
+                | Node::Link { children, .. } => count_text_nodes(children),
                 _ => 0,
             })
             .sum()

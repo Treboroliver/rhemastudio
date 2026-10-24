@@ -2955,6 +2955,7 @@ dependencies = [
  "memmap2",
  "proptest",
  "rhema-core",
+ "rusqlite",
  "tempfile",
  "thiserror 2.0.21",
  "tracing",

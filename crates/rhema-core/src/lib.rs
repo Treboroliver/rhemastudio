@@ -13,7 +13,7 @@ pub use canon::{
 };
 pub use error::{CanonError, ModuleError};
 pub use module_info::{ModuleInfo, ModuleKind};
-pub use node::{Node, StrongLang};
+pub use node::{LinkTarget, Node, StrongLang};
 pub use verse_range::VerseRange;
 pub use verse_ref::VerseRef;
 
