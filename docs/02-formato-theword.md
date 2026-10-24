@@ -85,7 +85,7 @@ O resultado das inspeções é colado em `docs/02-apendice-schemas.md` (um bloco
 - **Dicionário (`dct`):** busca por chave exata (`G25`, `H1254`, ou palavra). Strong grego/hebraico são os casos principais.
 - **Livro (`gbk`):** árvore de capítulos/seções; leitura sequencial; busca no texto. Híbrido: ligações a versículos aparecem como chips.
 - **Devocional (`dev`):** entradas por data (dia/mês).
-- Respeitar `content_type` em cada entrada; `config.content.type` é apenas uma declaração padrão observada em alguns módulos. Não presumir que todo `content.data` seja RTF.
+- Resolver o formato por entrada: usar `content_type` na linha e, se for NULL, usar `config.content.type`. Não presumir que todo `content.data` seja RTF. Na M1.4, `entries_for` deve continuar devolvendo as entradas legíveis quando outra entrada tiver tipo não suportado, associando `ModuleError::UnsupportedContent(tipo)` somente à entrada afetada para exibição de aviso na interface.
 - Conteúdo pode usar marcação própria, como links e formatação. Em formatos sem especificação confirmada, não decodificar por tentativa; documentar a evidência e aguardar a definição do formato antes de implementar leitor.
 - RVF também aparece em dados por entrada: 32 tópicos de Strong_AMG2 e uma referência de Holman declaram `rvf`, embora `config.content.type` de Strong_AMG2/Holman seja `rtf`.
 

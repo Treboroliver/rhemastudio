@@ -21,11 +21,19 @@ Marque `[x]` ao concluir. Cada milestone só termina quando **todos** os critér
 - [x] M1.3 Tokenizador de marcação → `Vec<Node>` (tolerante, com `UnknownTag`)
 - [x] M1.3b Conversor tolerante de RTF para `Vec<Node>`, com `plain_text`, hyperlinks, controles desconhecidos contados e amostras reais condicionadas a `RHEMA_TEST_MODULES`
 - [x] M1.3c Investigação do Mickelson: flags `do.encrypt=1`/`secure=1` detectadas e `EncryptedModule` retornado antes de acessar o conteúdo; sem decodificação de payload protegido
-- [ ] M1.4 Leitores `.twm`: comentário, dicionário, livro, conforme os schemas e formatos efetivamente observados
-  - Nota da M1.3b/M1.3c: comentários Holman/NICNT têm RTF textual; o Mickelson declara compressão e proteção (`do.encrypt=1`, `secure=1`) e deve ser rejeitado sem ler payload. O leitor deve respeitar `content_type` e não presumir que todo conteúdo `.twm` seja RTF. RVF/BLOBs não são decodificados nesta tarefa.
+- [ ] M1.4 Leitores `.twm`: comentário e dicionário, conforme os schemas e formatos efetivamente observados
+  - O formato é resolvido por entrada: coluna `content_type` da linha; se NULL, `config.content.type`. Holman-AT e Strong_AMG2 têm entradas RVF mesmo com configuração RTF.
+  - Tipo não suportado em uma entrada (incluindo RVF antes do parser) não pode falhar a consulta inteira: `entries_for` devolve as demais entradas legíveis e associa `ModuleError::UnsupportedContent` à entrada afetada para aviso na interface.
+  - Registrar contagens apenas por `content_type` em cada módulo; não inferir a proporção RVF pela configuração.
+  - [ ] `.cmt.twm` — comentários
+  - [ ] `.dct.twm` — dicionários
+  - [ ] `.gbk.twm` — livros (pendente)
+  - [ ] `.dev.twm` — devocionais (pendente)
+  - Nota da M1.3b/M1.3c: o Mickelson declara compressão e proteção (`do.encrypt=1`, `secure=1`) e deve ser rejeitado sem ler payload. RVF/BLOBs não são decodificados nesta tarefa.
   - Trava obrigatória: a função de abertura da biblioteca precisa chamar `ensure_twm_unprotected` antes de qualquer consulta de conteúdo; teste sintético com `do.encrypt=1` e `secure=1`. M1.3c complementar encontrou 110 entradas não RTF em VidaNova e 99.267 `UnknownTag` na ARA+; detalhes em `docs/02-apendice-schemas.md`.
-- [ ] M1.5 Gerador de fixtures sintéticas para cada tipo
-- [ ] M1.6 Testes `proptest` do tokenizador + snapshots `insta`
+- [ ] M1.5 Parser RVF — depende de especificação confirmada do perfil theWord
+- [ ] M1.6 Gerador de fixtures sintéticas para cada tipo
+- [ ] M1.7 Testes `proptest` do tokenizador + snapshots `insta`
 
 **Aceite:** `rhema-cli dump <bíblia.ont> --ref "Jo 3:16"` imprime o versículo e os Strong; `rhema-cli dump <dicionario.twm> --key G25` imprime a entrada; nenhum pânico em 10.000 entradas aleatórias; abertura de `.ont` < 200 ms.
 

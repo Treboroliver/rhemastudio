@@ -1,5 +1,12 @@
 # Changelog — RhemaStudio
 
+## [Adendo M1.4] — 2026-10-24
+
+### Documentado
+- Tipo de conteúdo resolvido por entrada (`content_type` da linha; fallback para `config.content.type` apenas quando NULL); formato não suportado deve ser isolado à entrada, sem interromper `entries_for`.
+- Distribuições documentadas no apêndice: Holman 10.857 RTF/1 RVF; NICNT 5.785 RTF; Strong_AMG2 14.167 RTF/32 RVF; VidaNova 110 RVF. Mickelson não foi consultado por estar protegido.
+- Roadmap reserva M1.5 para parser RVF dependente de especificação; `.gbk` e `.dev` permanecem pendentes. M1.4 não foi iniciada.
+
 ## [Complemento M1.3e] — 2026-10-24
 
 ### Concluído

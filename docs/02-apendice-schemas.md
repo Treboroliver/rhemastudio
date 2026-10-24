@@ -156,7 +156,7 @@ A amostra foi distribuída entre o início, o meio e o fim da tabela (`N=2.000` 
 | Holman-AT | 10.857 TEXT e 1 NULL (apesar da declaração `BLOB`) | NULL em 10.858/10.858 | `bible_refs.content_type`: `rtf` em 10.857, `rvf` em 1 | `rtf` |
 | NICNT | 5.785 TEXT (apesar da declaração `BLOB`) | NULL em 5.785/5.785 | `bible_refs.content_type`: `rtf` em 5.785 | Ausente |
 
-`content_type` é o formato indicado por tópico/referência (`rtf` ou `rvf` nos valores observados); `config.content.type`, quando existe, declara o formato padrão do módulo. A entrada `rvf` de Holman mostra por que a coluna por linha deve ser considerada. `data2` permaneceu NULL em todas as linhas consultadas; sua finalidade não foi confirmada. O significado de NULL como formato padrão também não foi confirmado.
+`content_type` é resolvido por tópico/referência; para M1.4, NULL usa `config.content.type` como fallback. A entrada `rvf` de Holman mostra por que a configuração não deve sobrepor um valor explícito da linha. `data2` permaneceu NULL em todas as linhas consultadas; sua finalidade não foi confirmada.
 
 Os comentários são RTF textual sem compressão observada. Nos 2.000 registros de cada comentário, `\ansicpg0` apareceu em todas as entradas. `\'hh` foi decodificado como Windows-1252; `\uN` representa unidade Unicode UTF-16 com sinal e `\ucN` define quantos caracteres de fallback descartar. NICNT contém caracteres gregos e hebraicos em Unicode; a contagem convertida na amostra release foi 117.089 gregos e 1.186 hebraicos. Holman apresentou dois caracteres hebraicos e nenhum grego na mesma amostra. `\fcharset` apareceu 216 vezes em Holman (215 com valor 0 e uma com 128) e não apareceu no NICNT; não se atribuiu significado de idioma a esses valores.
 
@@ -192,11 +192,11 @@ Como a configuração declara simultaneamente encriptação e proteção, a inve
 | `content_search.data` | 14.300 BLOBs; mínimo 132, mediana 257, máximo 2.175 bytes |
 | Entropia média de `content_search.data` | 7,189163 bits/byte |
 | `topics_wordindex` | 57.541 linhas; coluna `word` armazenada como texto legível, sem os valores reproduzidos |
-| `topics.content_type` | NULL em 14.299 linhas; `rvf` em 1; significado do NULL desconhecido |
+| `topics.content_type` | NULL em 14.299 linhas; `rvf` em 1; sem tipo padrão declarado na configuração |
 
 Os oito prefixos de oito bytes mais frequentes de `content.data` foram `C5 7D F8 CB 5B D7 75 8E` (14), `69 40 DF C9 19 31 62 B4` (9), `10 6E 81 11 1C C5 33 37` (9), `4F 0B D9 D6 4A A9 17 B9` (9), `C6 11 6D BB CC FD D5 B6` (8), `C2 4B 3B 47 58 50 6D AE` (8), `F6 89 A5 09 2F 05 6A 9E` (8) e `78 AC 49 79 39 AF 81 80` (8).
 
-Não houve correspondência nos bytes verificados para assinaturas comuns de zlib, gzip, bzip2, xz/LZMA, zstd, BOM UTF-16 ou `TWENCBMOD`, nem classificação como ASCII/UTF-8 válido ou RTF. A ausência de assinatura não contradiz `compressed=1` e não identifica o codec. Não é possível concluir a codificação, algoritmo, significado de `data2`, semântica de `content_type` NULL ou a estrutura dos links `tw://` para verbetes. Esses pontos não serão investigados por decodificação deste módulo protegido.
+Não houve correspondência nos bytes verificados para assinaturas comuns de zlib, gzip, bzip2, xz/LZMA, zstd, BOM UTF-16 ou `TWENCBMOD`, nem classificação como ASCII/UTF-8 válido ou RTF. A ausência de assinatura não contradiz `compressed=1` e não identifica o codec. Não é possível concluir a codificação, algoritmo, significado de `data2`, conteúdo efetivo associado às linhas com `content_type` NULL ou a estrutura dos links `tw://` para verbetes. A configuração Mickelson não declara `config.content.type`; esses pontos não serão investigados por decodificação deste módulo protegido.
 
 O leitor preventivo `ensure_twm_unprotected` abre SQLite com `SQLITE_OPEN_READ_ONLY` e retorna `ModuleError::EncryptedModule` quando `config` contém `do.encrypt=1` ou `secure=1`. A verificação não consulta `content`. Não se implementou decodificador para esse dicionário. Nenhum texto de módulo foi copiado para esta documentação.
 
@@ -529,6 +529,22 @@ Contagem total de ocorrências em 2.000 entradas distribuídas por arquivo. As c
 | `\widctlpar` | 232 | 0 |
 
 Os destinos/grupos especiais observados incluem `fonttbl` e `colortbl` (2.000 controle-word occurrences em cada arquivo), `stylesheet` e `notvatxbx` (1.742 em Holman; 1 em NICNT), `pict`/`jpegblip`/`pngblip` (59/55/4 em Holman), e os três elementos de campo `field`/`fldinst`/`fldrslt` (7.458 de cada em Holman; 60.898 de cada em NICNT). `\*` ocorreu 11.303 vezes em Holman e 60.902 em NICNT. Nos 2.000 registros de comentário, o conversor não contou controle nem destino desconhecido.
+
+---
+
+### 2.6 Contagens por tipo de conteúdo (M1.4)
+
+Contagens de linhas agrupadas por `content_type`; nenhum payload foi lido nesta consulta. O formato efetivo usa o valor da linha e recorre a `config.content.type` somente quando NULL.
+
+| Módulo | Tabela | `rtf` | `rvf` | NULL |
+|---|---|---:|---:|---:|
+| Holman-AT | `bible_refs` | 10.857 | 1 | 0 |
+| NICNT | `bible_refs` | 5.785 | 0 | 0 |
+| Strong_AMG2 | `topics` | 14.167 | 32 | 0 |
+| VidaNova | `bible_refs` | 0 | 110 | 0 |
+| Mickelson's Strong | `topics` | — | — | — |
+
+Os quatro primeiros módulos foram verificados em modo somente leitura após checagem das flags de proteção. Mickelson está protegido e não foi consultado para esta contagem; a seção 2.3 contém estatísticas históricas, sem nova leitura nesta investigação.
 
 ---
 
