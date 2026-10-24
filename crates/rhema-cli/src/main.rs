@@ -45,6 +45,14 @@ enum Commands {
         /// Número do versículo
         #[arg(long)]
         verse: u16,
+
+        /// Exibe a árvore de nós interpretada
+        #[arg(long, conflicts_with = "plain")]
+        parsed: bool,
+
+        /// Exibe texto sem tags e sem notas
+        #[arg(long)]
+        plain: bool,
     },
 }
 
@@ -58,11 +66,20 @@ fn main() -> Result<()> {
             book,
             chapter,
             verse,
-        } => dump_verse(&file, book, chapter, verse),
+            parsed,
+            plain,
+        } => dump_verse(&file, book, chapter, verse, parsed, plain),
     }
 }
 
-fn dump_verse(file: &Path, book_num: u8, chapter: u16, verse_num: u16) -> Result<()> {
+fn dump_verse(
+    file: &Path,
+    book_num: u8,
+    chapter: u16,
+    verse_num: u16,
+    parsed: bool,
+    plain: bool,
+) -> Result<()> {
     let book = Book::from_number(book_num).ok_or_else(|| {
         anyhow::anyhow!(
             "Número de livro inválido: {} (deve estar entre 1 e 66)",
@@ -85,9 +102,17 @@ fn dump_verse(file: &Path, book_num: u8, chapter: u16, verse_num: u16) -> Result
         println!("Aviso: Módulo operando em modo degradado");
     }
 
-    let text = reader.verse(book, chapter, verse_num)?;
     println!("------------------------------------------------------------");
-    println!("{}", text);
+    if parsed {
+        println!("{:#?}", reader.verse_nodes(book, chapter, verse_num)?);
+    } else if plain {
+        println!(
+            "{}",
+            rhema_twformat::plain_text(&reader.verse_nodes(book, chapter, verse_num)?)
+        );
+    } else {
+        println!("{}", reader.verse(book, chapter, verse_num)?);
+    }
     println!("------------------------------------------------------------");
 
     Ok(())

@@ -9,6 +9,7 @@ use rhema_core::{
 };
 
 use crate::detect::detect_signature;
+use crate::markup::tokenize_markup;
 
 /// Escopo do texto bíblico contido no módulo
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -257,6 +258,17 @@ impl OntReader {
         self.verse_by_ref(VerseRef::new(book, chapter, verse))
     }
 
+    /// Retorna os nós tipados do versículo, preservando marcação desconhecida.
+    pub fn verse_nodes(
+        &self,
+        book: Book,
+        chapter: u16,
+        verse: u16,
+    ) -> Result<Vec<rhema_core::Node>, ModuleError> {
+        self.verse(book, chapter, verse)
+            .map(|text| tokenize_markup(&text))
+    }
+
     /// Obtém o texto bruto do versículo através de um `VerseRef`.
     pub fn verse_by_ref(&self, r: VerseRef) -> Result<String, ModuleError> {
         if !r.is_valid() {
@@ -313,6 +325,20 @@ impl OntReader {
         }
 
         Ok(verses)
+    }
+
+    /// Retorna os nós tipados de cada versículo do capítulo.
+    pub fn chapter_nodes(
+        &self,
+        book: Book,
+        chapter: u16,
+    ) -> Result<Vec<(u16, Vec<rhema_core::Node>)>, ModuleError> {
+        self.chapter(book, chapter).map(|verses| {
+            verses
+                .into_iter()
+                .map(|(number, text)| (number, tokenize_markup(&text)))
+                .collect()
+        })
     }
 }
 

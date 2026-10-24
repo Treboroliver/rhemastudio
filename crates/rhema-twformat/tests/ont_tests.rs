@@ -1,10 +1,11 @@
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::Instant;
 
 use proptest::prelude::*;
 use rhema_core::{Book, ModuleError};
-use rhema_twformat::{BibleScope, OntReader};
+use rhema_twformat::{plain_text, tokenize_markup, BibleScope, OntReader};
 use tempfile::NamedTempFile;
 
 #[test]
@@ -170,6 +171,83 @@ fn test_real_modules_integration_and_performance() {
             "Módulo encriptado deve retornar ModuleError::EncryptedModule"
         );
     }
+}
+
+#[test]
+fn test_tokenize_all_real_kjv_verses_when_configured() {
+    let Ok(test_dir) = std::env::var("RHEMA_TEST_MODULES") else {
+        println!("RHEMA_TEST_MODULES não definida. Pulando teste do KJV real.");
+        return;
+    };
+    let path = PathBuf::from(test_dir).join("kjv.ont");
+    if !path.exists() {
+        println!(
+            "kjv.ont não encontrado diretamente em RHEMA_TEST_MODULES ({}). Pulando.",
+            path.display()
+        );
+        return;
+    }
+
+    let reader = OntReader::open(&path).expect("Falha ao abrir kjv.ont real");
+    assert_eq!(reader.verse_count(), 31_102);
+
+    let started = Instant::now();
+    let mut unknown_count = 0;
+    let mut unknown_names = BTreeMap::new();
+    for index in 0..reader.verse_count() {
+        let raw = reader
+            .line_by_index(index)
+            .expect("Falha ao ler linha do kjv.ont");
+        let nodes = tokenize_markup(&raw);
+        unknown_count += count_unknown_tags(&nodes);
+        collect_unknown_tag_names(&nodes, &mut unknown_names);
+        let plain = plain_text(&nodes);
+        assert!(
+            !plain.contains(['<', '>']),
+            "Texto simples contém delimitador de tag na linha {index}"
+        );
+    }
+    let elapsed = started.elapsed();
+
+    println!("Versículos tokenizados: 31.102");
+    println!("UnknownTag encontrados: {unknown_count}");
+    println!("Tipos UnknownTag: {unknown_names:?}");
+    println!("Tempo para tokenizar Bíblia inteira: {elapsed:?}");
+    assert_eq!(unknown_count, 0);
+}
+
+fn collect_unknown_tag_names(nodes: &[rhema_core::Node], names: &mut BTreeMap<String, usize>) {
+    for node in nodes {
+        match node {
+            rhema_core::Node::UnknownTag { name, children, .. } => {
+                *names.entry(name.clone()).or_default() += 1;
+                collect_unknown_tag_names(children, names);
+            }
+            rhema_core::Node::Italic(children)
+            | rhema_core::Node::WordsOfJesus(children)
+            | rhema_core::Node::OtQuote(children)
+            | rhema_core::Node::Heading(_, children)
+            | rhema_core::Node::Strong { children, .. }
+            | rhema_core::Node::Note(children) => collect_unknown_tag_names(children, names),
+            _ => {}
+        }
+    }
+}
+
+fn count_unknown_tags(nodes: &[rhema_core::Node]) -> usize {
+    nodes
+        .iter()
+        .map(|node| match node {
+            rhema_core::Node::UnknownTag { children, .. } => 1 + count_unknown_tags(children),
+            rhema_core::Node::Italic(children)
+            | rhema_core::Node::WordsOfJesus(children)
+            | rhema_core::Node::OtQuote(children)
+            | rhema_core::Node::Heading(_, children)
+            | rhema_core::Node::Strong { children, .. }
+            | rhema_core::Node::Note(children) => count_unknown_tags(children),
+            _ => 0,
+        })
+        .sum()
 }
 
 // Testes de Propriedade (proptest)

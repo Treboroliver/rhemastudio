@@ -28,6 +28,7 @@ pub enum Node {
     UnknownTag {
         name: String,
         raw: String,
+        children: Vec<Node>,
     },
 }
 
@@ -48,13 +49,15 @@ impl Node {
             | Node::Strong {
                 children: nodes, ..
             }
-            | Node::Note(nodes) => {
+            | Node::UnknownTag {
+                children: nodes, ..
+            } => {
                 for node in nodes {
                     node.write_plain_text(buf);
                 }
             }
-            Node::Paragraph | Node::LineBreak => buf.push(' '),
-            Node::Morph(_) | Node::XRef(_) | Node::UnknownTag { .. } => {}
+            Node::Note(_) => {}
+            Node::Paragraph | Node::LineBreak | Node::Morph(_) | Node::XRef(_) => {}
         }
     }
 }

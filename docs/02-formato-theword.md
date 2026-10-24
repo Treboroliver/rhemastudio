@@ -35,28 +35,34 @@ Usar tabela canônica de versículos por capítulo (versificação padrão prote
 
 Se o número de linhas não bater, o módulo é marcado como **"versificação não padrão"** e abre em modo degradado (por linha) com aviso. Nunca travar.
 
-### 2.3 Marcação dentro do versículo (Confirmado)
-Tags conhecidas e validadas contra módulos reais (ex.: `kjv.ont`):
+### 2.3 Marcação dentro do versículo
+Tags com status **Confirmado** foram observadas em módulos reais (incluindo `kjv.ont`); tags **[VERIFICAR]** são implementadas conforme esta especificação, mas ainda não foram confirmadas contra um módulo real.
 
-| Tag (abre/fecha) | Significado | Nó em `RichText` |
+| Tag (abre/fecha) | Significado | Nó em `RichText` | Status |
 |---|---|---|
-| `<TS>…<Ts>` (e variações de nível) | Título de seção | `Heading(nível)` |
-| `<CM>` | Quebra de parágrafo | `Paragraph` |
-| `<CL>` | Quebra de linha | `LineBreak` |
-| `<FI>…<Fi>` | Itálico (palavras adicionadas) | `Italic` |
-| `<FR>…<Fr>` | Palavras de Jesus | `WordsOfJesus` |
-| `<FO>…<Fo>` | Citação do AT | `OtQuote` |
-| `<WG####>` | Número de Strong grego | `Strong{Greek, n}` |
-| `<WH####>` | Número de Strong hebraico | `Strong{Hebrew, n}` |
-| `<WT…>` | Morfologia | `Morph(código)` |
-| `<RF>…<Rf>` | Nota de rodapé | `Note` |
-| `<RX …>` | Referência cruzada | `XRef(VerseRange)` |
+| `<WG####>` | Número de Strong grego | `Strong{Greek, n}` | Confirmado |
+| `<WH####>` | Número de Strong hebraico | `Strong{Hebrew, n}` | Confirmado |
+| `<WG####x>` | Variante observada no `kjv.ont` (sufixo `x` após o número) | `Strong{Greek, n}` | Confirmado |
+| `<XWG####>` | Strong grego não traduzido | `Strong{Greek, n}` | Confirmado |
+| `<FR>…<Fr>` | Palavras de Jesus | `WordsOfJesus` | Confirmado |
+| `<FI>…<Fi>` | Itálico (palavras adicionadas) | `Italic` | Confirmado |
+| `<RF>…<Rf>` | Nota de rodapé | `Note` | Confirmado |
+| `<CM>` | Quebra de parágrafo | `Paragraph` | Confirmado |
+| `<FO>…<Fo>` | Citação do AT | `OtQuote` | Confirmado |
+| `<i>…</i>` | Itálico estilo HTML | `Italic` | Confirmado |
+| `<TS>…<Ts>` (e variações de nível) | Título de seção | `Heading(nível)` | **[VERIFICAR]** |
+| `<CL>` | Quebra de linha | `LineBreak` | **[VERIFICAR]** |
+| `<WT…>` | Morfologia | `Morph(código)` | **[VERIFICAR]** |
+| `<RX …>` | Referência cruzada | `XRef(VerseRange)` | **[VERIFICAR]** |
 
 **Regras do tokenizador:**
 - Case-sensitive (abertura/fechamento diferem pela caixa).
-- **Tag desconhecida nunca falha:** vira nó `UnknownTag{name, raw}` e o texto interno é preservado.
-- Tags desbalanceadas são fechadas automaticamente no fim do versículo.
-- O número de Strong **se liga à palavra que o precede**; guardar a posição para o clique.
+- **Tag desconhecida nunca falha:** vira `UnknownTag{name, raw, children}`; `raw` preserva a grafia original das tags e `children` preserva o conteúdo interno.
+- Tags abertas são fechadas automaticamente no fim do versículo; fechamentos sem abertura correspondente são ignorados.
+- O número de Strong se liga ao último trecho contíguo sem espaços antes da tag, preservando a pontuação adjacente. Se o texto anterior tiver várias palavras, somente a última palavra (com sua pontuação) recebe o Strong. Strong consecutivos aninham-se sobre o mesmo trecho; assim, nenhum deles desloca a associação do anterior.
+- Se não houver palavra anterior para associar, o Strong é preservado como `Strong` sem filhos.
+- `plain_text` concatena texto sem inserir separadores, remove notas e metadados de marcação, e mantém o conteúdo de tags desconhecidas.
+- Para tags [VERIFICAR], o tokenizador aceita `<TS>`/`<TSn>` com `<Ts>`/`<Tsn>`, `<WT…>` como código de morfologia e `<RX…>` como uma referência canônica no formato `Livro capítulo:versículo[-versículo]`. Se `<RX…>` não puder ser interpretada, é preservada como `UnknownTag`. **[VERIFICAR]** o formato e os níveis reais de `<TS>`, a sintaxe de `<WT>` e a codificação de `<RX>` contra módulos reais antes de tratá-los como definitivos.
 - Entidades e símbolos especiais: preservar; sanitizar ao renderizar (nunca injetar HTML bruto do módulo).
 
 ### 2.4 Propriedades de módulo
@@ -113,7 +119,7 @@ pub enum Node {
     XRef(VerseRange),
     Paragraph,
     LineBreak,
-    UnknownTag { name: String, raw: String },
+    UnknownTag { name: String, raw: String, children: Vec<Node> },
 }
 
 pub trait BibleSource {

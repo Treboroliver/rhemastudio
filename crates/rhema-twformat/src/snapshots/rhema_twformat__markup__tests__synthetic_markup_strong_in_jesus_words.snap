@@ -1,0 +1,19 @@
+---
+source: crates/rhema-twformat/src/markup.rs
+expression: "tokenize_markup(\"<FR>loved<Fr><WG25>\")"
+---
+[
+    WordsOfJesus(
+        [
+            Strong {
+                lang: Greek,
+                num: 25,
+                children: [
+                    Text(
+                        "loved",
+                    ),
+                ],
+            },
+        ],
+    ),
+]

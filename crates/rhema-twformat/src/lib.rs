@@ -1,8 +1,10 @@
 pub mod bible_reader;
 pub mod detect;
+pub mod markup;
 
 pub use bible_reader::{BibleScope, OntReader};
 pub use detect::{detect_signature, ModuleSignature, SQLITE_MAGIC, TW_ENCRYPTED_MAGIC};
+pub use markup::{plain_text, tokenize_markup};
 
 #[cfg(test)]
 mod tests {
@@ -30,6 +32,14 @@ mod tests {
         let john3_16 = reader.verse(Book::John, 3, 16).unwrap();
         assert!(john3_16.contains("Jo 3:16"));
         assert!(john3_16.contains("<FR>"));
+        let john3_16_nodes = reader.verse_nodes(Book::John, 3, 16).unwrap();
+        assert!(john3_16_nodes
+            .iter()
+            .any(|node| matches!(node, rhema_core::Node::WordsOfJesus(_))));
+        assert_eq!(
+            plain_text(&john3_16_nodes),
+            "Texto sintético de Jo 3:16 Porque Deus amou o mundo de tal maneira..."
+        );
 
         // Ler Apocalipse 22:21
         let rev22_21 = reader.verse(Book::Revelation, 22, 21).unwrap();
@@ -40,6 +50,12 @@ mod tests {
         assert_eq!(ch.len(), 36);
         assert_eq!(ch[15].0, 16); // versículo 16
         assert!(ch[15].1.contains("Jo 3:16"));
+        let ch_nodes = reader.chapter_nodes(Book::John, 3).unwrap();
+        assert_eq!(ch_nodes.len(), 36);
+        assert!(ch_nodes[15]
+            .1
+            .iter()
+            .any(|node| matches!(node, rhema_core::Node::WordsOfJesus(_))));
 
         // Verificar propriedades
         let props = reader.properties();

@@ -1,0 +1,640 @@
+use rhema_core::{Book, Node, StrongLang, VerseRange, VerseRef};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ContainerKind {
+    Italic,
+    WordsOfJesus,
+    OtQuote,
+    Heading(u8),
+    Note,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FrameKind {
+    Container(ContainerKind),
+    Unknown,
+}
+
+struct Frame {
+    kind: FrameKind,
+    name: String,
+    raw_open: String,
+    raw_close: String,
+    children: Vec<Node>,
+}
+
+enum Token {
+    Open {
+        kind: FrameKind,
+        name: String,
+        self_closing: bool,
+    },
+    Close {
+        kind: FrameKind,
+        name: String,
+    },
+    Inline(Node),
+    Strong(StrongLang, u32),
+    Unknown {
+        name: String,
+        self_closing: bool,
+    },
+    UnknownClose(String),
+}
+
+/// Converte marcação de versículo em nós tolerantes, preservando todo o texto.
+pub fn tokenize_markup(input: &str) -> Vec<Node> {
+    let mut root = Vec::new();
+    let mut stack: Vec<Frame> = Vec::new();
+    let mut cursor = 0;
+
+    while cursor < input.len() {
+        let Some(relative_start) = input[cursor..].find('<') else {
+            append_text(&mut root, &mut stack, &input[cursor..]);
+            break;
+        };
+        let start = cursor + relative_start;
+        if start > cursor {
+            append_text(&mut root, &mut stack, &input[cursor..start]);
+        }
+
+        let Some(relative_end) = input[start..].find('>') else {
+            append_text(&mut root, &mut stack, &input[start..]);
+            break;
+        };
+        let end = start + relative_end;
+        let raw_tag = &input[start..=end];
+        let contents = &input[start + 1..end];
+
+        match parse_token(contents) {
+            Token::Open {
+                kind,
+                name,
+                self_closing,
+            } => {
+                if self_closing {
+                    append_node(
+                        &mut root,
+                        &mut stack,
+                        build_node(Frame {
+                            kind,
+                            name,
+                            raw_open: raw_tag.to_string(),
+                            raw_close: String::new(),
+                            children: Vec::new(),
+                        }),
+                    );
+                } else {
+                    stack.push(Frame {
+                        kind,
+                        name,
+                        raw_open: raw_tag.to_string(),
+                        raw_close: String::new(),
+                        children: Vec::new(),
+                    });
+                }
+            }
+            Token::Close { kind, name } => {
+                if let Some(index) = stack
+                    .iter()
+                    .rposition(|frame| frame.kind == kind && frame.name == name)
+                {
+                    while stack.len() > index + 1 {
+                        if let Some(frame) = stack.pop() {
+                            append_node(&mut root, &mut stack, build_node(frame));
+                        }
+                    }
+                    if let Some(mut frame) = stack.pop() {
+                        frame.raw_close = raw_tag.to_string();
+                        append_node(&mut root, &mut stack, build_node(frame));
+                    }
+                }
+            }
+            Token::Inline(node) => append_node(&mut root, &mut stack, node),
+            Token::Strong(lang, num) => {
+                if !attach_strong(&mut root, &mut stack, lang, num) {
+                    append_node(
+                        &mut root,
+                        &mut stack,
+                        Node::Strong {
+                            lang,
+                            num,
+                            children: Vec::new(),
+                        },
+                    );
+                }
+            }
+            Token::Unknown { name, self_closing } => {
+                let kind = FrameKind::Unknown;
+                if self_closing {
+                    append_node(
+                        &mut root,
+                        &mut stack,
+                        Node::UnknownTag {
+                            name,
+                            raw: raw_tag.to_string(),
+                            children: Vec::new(),
+                        },
+                    );
+                } else {
+                    stack.push(Frame {
+                        kind,
+                        name,
+                        raw_open: raw_tag.to_string(),
+                        raw_close: String::new(),
+                        children: Vec::new(),
+                    });
+                }
+            }
+            Token::UnknownClose(name) => {
+                if let Some(index) = stack
+                    .iter()
+                    .rposition(|frame| frame.kind == FrameKind::Unknown && frame.name == name)
+                {
+                    while stack.len() > index + 1 {
+                        if let Some(frame) = stack.pop() {
+                            append_node(&mut root, &mut stack, build_node(frame));
+                        }
+                    }
+                    if let Some(mut frame) = stack.pop() {
+                        frame.raw_close = raw_tag.to_string();
+                        append_node(&mut root, &mut stack, build_node(frame));
+                    }
+                }
+            }
+        }
+        cursor = end + 1;
+    }
+
+    while let Some(frame) = stack.pop() {
+        append_node(&mut root, &mut stack, build_node(frame));
+    }
+    root
+}
+
+/// Concatena texto para busca, sem notas, metadados ou marcadores estruturais.
+pub fn plain_text(nodes: &[Node]) -> String {
+    nodes.iter().map(Node::to_plain_text).collect()
+}
+
+fn parse_token(contents: &str) -> Token {
+    if let Some((kind, name)) = parse_container_name(contents, true) {
+        return Token::Close { kind, name };
+    }
+    if let Some(closing) = contents.strip_prefix('/') {
+        if closing == "i" {
+            return Token::Close {
+                kind: FrameKind::Container(ContainerKind::Italic),
+                name: "i".to_string(),
+            };
+        }
+        return match parse_container_name(closing, true) {
+            Some((kind, name)) => Token::Close { kind, name },
+            None => Token::UnknownClose(closing.to_string()),
+        };
+    }
+
+    let trimmed = contents.trim_end();
+    let (tag, self_closing) = if let Some(tag) = trimmed.strip_suffix('/') {
+        (tag.trim_end(), true)
+    } else {
+        (contents, false)
+    };
+
+    if let Some(kind) = parse_inline(tag) {
+        return Token::Inline(kind);
+    }
+    if let Some(strong) = parse_strong(tag) {
+        return Token::Strong(strong.0, strong.1);
+    }
+    if let Some(payload) = tag.strip_prefix("WT") {
+        return Token::Inline(Node::Morph(payload.to_string()));
+    }
+    if let Some(payload) = tag.strip_prefix("RX") {
+        if let Some(range) = parse_xref(payload) {
+            return Token::Inline(Node::XRef(range));
+        }
+        return Token::Unknown {
+            name: tag.to_string(),
+            self_closing: true,
+        };
+    }
+    if let Some((kind, name)) = parse_container_name(tag, false) {
+        return Token::Open {
+            kind,
+            name,
+            self_closing,
+        };
+    }
+    if tag.is_empty() {
+        return Token::Unknown {
+            name: tag.to_string(),
+            self_closing: true,
+        };
+    }
+    Token::Unknown {
+        name: tag.to_string(),
+        self_closing,
+    }
+}
+
+fn parse_inline(tag: &str) -> Option<Node> {
+    match tag {
+        "CM" => Some(Node::Paragraph),
+        "CL" => Some(Node::LineBreak),
+        _ => None,
+    }
+}
+
+fn parse_strong(tag: &str) -> Option<(StrongLang, u32)> {
+    let (prefix, lang) = if tag.starts_with("XWG") || tag.starts_with("WG") {
+        (
+            if tag.starts_with("XWG") { "XWG" } else { "WG" },
+            StrongLang::Greek,
+        )
+    } else if tag.starts_with("WH") {
+        ("WH", StrongLang::Hebrew)
+    } else {
+        return None;
+    };
+    let payload = tag.strip_prefix(prefix)?;
+    let digits = payload.strip_suffix('x').unwrap_or(payload);
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok().map(|num| (lang, num))
+}
+
+fn parse_container_name(tag: &str, closing: bool) -> Option<(FrameKind, String)> {
+    let (kind, name) = match tag {
+        "FI" if !closing => (ContainerKind::Italic, "FI".to_string()),
+        "Fi" if closing => (ContainerKind::Italic, "FI".to_string()),
+        "FR" if !closing => (ContainerKind::WordsOfJesus, "FR".to_string()),
+        "Fr" if closing => (ContainerKind::WordsOfJesus, "FR".to_string()),
+        "FO" if !closing => (ContainerKind::OtQuote, "FO".to_string()),
+        "Fo" if closing => (ContainerKind::OtQuote, "FO".to_string()),
+        "RF" if !closing => (ContainerKind::Note, "RF".to_string()),
+        "Rf" if closing => (ContainerKind::Note, "RF".to_string()),
+        "i" if !closing => (ContainerKind::Italic, "i".to_string()),
+        _ => {
+            let level = tag.strip_prefix(if closing { "Ts" } else { "TS" })?;
+            let level = if level.is_empty() {
+                1
+            } else if level.bytes().all(|byte| byte.is_ascii_digit()) {
+                level.parse::<u8>().ok()?
+            } else {
+                return None;
+            };
+            if level == 0 {
+                return None;
+            }
+            (ContainerKind::Heading(level), format!("TS{level}"))
+        }
+    };
+    Some((FrameKind::Container(kind), name))
+}
+
+fn parse_xref(payload: &str) -> Option<VerseRange> {
+    let payload = payload.trim();
+    let separator = payload.rfind(char::is_whitespace)?;
+    let book = Book::find(payload[..separator].trim())?;
+    let location = payload[separator..].trim();
+    let (start, end) = match location.split_once('-') {
+        Some((start, end)) => {
+            let start = parse_xref_ref(book, start)?;
+            let end = if end.contains(':') {
+                parse_xref_ref(book, end)?
+            } else {
+                VerseRef::new(book, start.chapter, end.parse().ok()?)
+            };
+            (start, end)
+        }
+        None => {
+            let verse = parse_xref_ref(book, location)?;
+            (verse, verse)
+        }
+    };
+    VerseRange::new(start, end).ok()
+}
+
+fn parse_xref_ref(book: Book, location: &str) -> Option<VerseRef> {
+    let (chapter, verse) = location.split_once(':')?;
+    Some(VerseRef::new(
+        book,
+        chapter.parse().ok()?,
+        verse.parse().ok()?,
+    ))
+}
+
+fn append_text(root: &mut Vec<Node>, stack: &mut [Frame], text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    let nodes = stack
+        .last_mut()
+        .map(|frame| &mut frame.children)
+        .unwrap_or(root);
+    if let Some(Node::Text(previous)) = nodes.last_mut() {
+        previous.push_str(text);
+    } else {
+        nodes.push(Node::Text(text.to_string()));
+    }
+}
+
+fn append_node(root: &mut Vec<Node>, stack: &mut [Frame], node: Node) {
+    stack
+        .last_mut()
+        .map(|frame| &mut frame.children)
+        .unwrap_or(root)
+        .push(node);
+}
+
+fn build_node(frame: Frame) -> Node {
+    match frame.kind {
+        FrameKind::Container(ContainerKind::Italic) => Node::Italic(frame.children),
+        FrameKind::Container(ContainerKind::WordsOfJesus) => Node::WordsOfJesus(frame.children),
+        FrameKind::Container(ContainerKind::OtQuote) => Node::OtQuote(frame.children),
+        FrameKind::Container(ContainerKind::Heading(level)) => Node::Heading(level, frame.children),
+        FrameKind::Container(ContainerKind::Note) => Node::Note(frame.children),
+        FrameKind::Unknown => Node::UnknownTag {
+            name: frame.name,
+            raw: format!("{}{}", frame.raw_open, frame.raw_close),
+            children: frame.children,
+        },
+    }
+}
+
+fn attach_strong(root: &mut Vec<Node>, stack: &mut [Frame], lang: StrongLang, num: u32) -> bool {
+    for frame in stack.iter_mut().rev() {
+        if attach_strong_to_nodes(&mut frame.children, lang, num) {
+            return true;
+        }
+    }
+    attach_strong_to_nodes(root, lang, num)
+}
+
+fn attach_strong_to_nodes(nodes: &mut Vec<Node>, lang: StrongLang, num: u32) -> bool {
+    for index in (0..nodes.len()).rev() {
+        match &mut nodes[index] {
+            Node::Text(text) => {
+                let Some((start, end)) = trailing_word_range(text) else {
+                    continue;
+                };
+                let word = text[start..end].to_string();
+                let remainder = format!("{}{}", &text[..start], &text[end..]);
+                let mut replacement = Vec::with_capacity(3);
+                if !remainder.is_empty() {
+                    replacement.push(Node::Text(remainder));
+                }
+                replacement.push(Node::Strong {
+                    lang,
+                    num,
+                    children: vec![Node::Text(word)],
+                });
+                nodes.splice(index..=index, replacement);
+                return true;
+            }
+            Node::Italic(children)
+            | Node::WordsOfJesus(children)
+            | Node::OtQuote(children)
+            | Node::Heading(_, children)
+            | Node::Strong { children, .. }
+            | Node::Note(children)
+            | Node::UnknownTag { children, .. } => {
+                if attach_strong_to_nodes(children, lang, num) {
+                    return true;
+                }
+            }
+            Node::Morph(_) | Node::XRef(_) | Node::Paragraph | Node::LineBreak => {}
+        }
+    }
+    false
+}
+
+fn trailing_word_range(text: &str) -> Option<(usize, usize)> {
+    let (end, _) = text
+        .char_indices()
+        .rev()
+        .find(|(_, character)| !character.is_whitespace())?;
+    let end = end + text[end..].chars().next()?.len_utf8();
+    let start = text[..end]
+        .char_indices()
+        .rev()
+        .find(|(_, character)| character.is_whitespace())
+        .map(|(index, character)| index + character.len_utf8())
+        .unwrap_or(0);
+    Some((start, end))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn visible_text(nodes: &[Node]) -> String {
+        let mut output = String::new();
+        for node in nodes {
+            match node {
+                Node::Text(text) => output.push_str(text),
+                Node::Italic(children)
+                | Node::WordsOfJesus(children)
+                | Node::OtQuote(children)
+                | Node::Heading(_, children)
+                | Node::Strong { children, .. }
+                | Node::Note(children)
+                | Node::UnknownTag { children, .. } => output.push_str(&visible_text(children)),
+                Node::Paragraph | Node::LineBreak | Node::Morph(_) | Node::XRef(_) => {}
+            }
+        }
+        output
+    }
+
+    fn count_text_nodes(nodes: &[Node]) -> usize {
+        nodes
+            .iter()
+            .map(|node| match node {
+                Node::Text(_) => 1,
+                Node::Italic(children)
+                | Node::WordsOfJesus(children)
+                | Node::OtQuote(children)
+                | Node::Heading(_, children)
+                | Node::Strong { children, .. }
+                | Node::Note(children)
+                | Node::UnknownTag { children, .. } => count_text_nodes(children),
+                _ => 0,
+            })
+            .sum()
+    }
+
+    #[test]
+    fn parses_confirmed_container_and_inline_tags() {
+        let nodes = tokenize_markup(
+            "<FR>Jesus<Fr> <FI>added<Fi> <FO>quoted<Fo><RF>note<Rf><CM><CL><i>word</i>",
+        );
+        assert!(matches!(nodes[0], Node::WordsOfJesus(_)));
+        assert!(matches!(nodes[1], Node::Text(ref text) if text == " "));
+        assert!(matches!(nodes[2], Node::Italic(_)));
+        assert!(matches!(nodes[4], Node::OtQuote(_)));
+        assert!(matches!(nodes[5], Node::Note(_)));
+        assert!(nodes.iter().any(|node| matches!(node, Node::Paragraph)));
+        assert!(nodes.iter().any(|node| matches!(node, Node::LineBreak)));
+        assert_eq!(
+            nodes
+                .iter()
+                .filter(|node| matches!(node, Node::Italic(_)))
+                .count(),
+            2
+        );
+        assert_eq!(plain_text(&nodes), "Jesus added quotedword");
+        assert_eq!(visible_text(&nodes), "Jesus added quotednoteword");
+    }
+
+    #[test]
+    fn parses_strong_tags_and_attaches_them_to_the_previous_word() {
+        let nodes = tokenize_markup("<FR>loved<Fr><WG25><WH1><XWG2532>");
+        assert!(matches!(
+            &nodes[0],
+            Node::WordsOfJesus(children)
+                if matches!(
+                    &children[0],
+                    Node::Strong {
+                        lang: StrongLang::Greek,
+                        num: 25,
+                        children: first,
+                    } if matches!(
+                        &first[0],
+                        Node::Strong {
+                            lang: StrongLang::Hebrew,
+                            num: 1,
+                            children: second,
+                        } if matches!(
+                            &second[0],
+                            Node::Strong {
+                                lang: StrongLang::Greek,
+                                num: 2532,
+                                children: third,
+                            } if matches!(&third[0], Node::Text(word) if word == "loved")
+                        )
+                    )
+                )
+        ));
+        assert_eq!(plain_text(&nodes), "loved");
+        assert!(matches!(
+            tokenize_markup("word<WG25x>").as_slice(),
+            [Node::Strong {
+                lang: StrongLang::Greek,
+                num: 25,
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn last_word_is_selected_for_strong_when_text_has_multiple_words() {
+        let nodes = tokenize_markup("one, two words<WG7>");
+        assert!(matches!(
+            &nodes[1],
+            Node::Strong { children, .. }
+                if matches!(&children[0], Node::Text(word) if word == "words")
+        ));
+        assert_eq!(plain_text(&nodes), "one, two words");
+    }
+
+    #[test]
+    fn parses_unconfirmed_tags_as_documented() {
+        let nodes = tokenize_markup("<TS2>title<Ts2><WTV-PAI><RXJo 3:16-18>");
+        assert!(matches!(&nodes[0], Node::Heading(2, _)));
+        assert!(matches!(&nodes[1], Node::Morph(code) if code == "V-PAI"));
+        assert!(matches!(
+            nodes[2],
+            Node::XRef(VerseRange {
+                start: VerseRef {
+                    book: Book::John,
+                    chapter: 3,
+                    verse: 16,
+                },
+                end: VerseRef {
+                    book: Book::John,
+                    chapter: 3,
+                    verse: 18,
+                }
+            })
+        ));
+        assert_eq!(plain_text(&nodes), "title");
+    }
+
+    #[test]
+    fn unknown_tags_preserve_name_raw_and_inner_text() {
+        let nodes = tokenize_markup("before<custom data>inside</custom data>after");
+        assert_eq!(visible_text(&nodes), "beforeinsideafter");
+        assert!(matches!(
+            &nodes[1],
+            Node::UnknownTag {
+                name,
+                raw,
+                children,
+            } if name == "custom data"
+                && raw == "<custom data></custom data>"
+                && matches!(&children[0], Node::Text(text) if text == "inside")
+        ));
+    }
+
+    #[test]
+    fn handles_nested_unbalanced_and_unmatched_tags() {
+        let nested = tokenize_markup("<FI>a<FR>b<Fr>c<Fi>");
+        assert_eq!(visible_text(&nested), "abc");
+        assert!(
+            matches!(&nested[0], Node::Italic(children) if matches!(&children[1], Node::WordsOfJesus(_)))
+        );
+
+        let unbalanced = tokenize_markup("<FI>open");
+        assert!(matches!(&unbalanced[0], Node::Italic(_)));
+        assert_eq!(visible_text(&unbalanced), "open");
+
+        let unmatched = tokenize_markup("a</Fi>b</unknown>");
+        assert_eq!(visible_text(&unmatched), "ab");
+        assert_eq!(count_text_nodes(&unmatched), 1);
+    }
+
+    #[test]
+    fn empty_and_loose_angle_bracket_are_safe() {
+        assert!(tokenize_markup("").is_empty());
+        assert_eq!(tokenize_markup("<"), vec![Node::Text("<".to_string())]);
+        assert_eq!(plain_text(&tokenize_markup("a < b")), "a < b");
+    }
+
+    #[test]
+    fn synthetic_markup_snapshots() {
+        insta::assert_debug_snapshot!(
+            "synthetic_markup_strong_in_jesus_words",
+            tokenize_markup("<FR>loved<Fr><WG25>")
+        );
+        insta::assert_debug_snapshot!(
+            "synthetic_markup_nested_unknown_and_note",
+            tokenize_markup("<FI>grace <custom>kept</custom><Fi><RF>synthetic note<Rf>")
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn arbitrary_markup_never_panics_and_preserves_text(input in any::<String>()) {
+            let nodes = tokenize_markup(&input);
+            let mut expected = String::new();
+            let mut cursor = 0;
+            while cursor < input.len() {
+                let Some(start_offset) = input[cursor..].find('<') else {
+                    expected.push_str(&input[cursor..]);
+                    break;
+                };
+                let start = cursor + start_offset;
+                expected.push_str(&input[cursor..start]);
+                let Some(end_offset) = input[start..].find('>') else {
+                    expected.push_str(&input[start..]);
+                    break;
+                };
+                cursor = start + end_offset + 1;
+            }
+            prop_assert_eq!(visible_text(&nodes), expected);
+        }
+    }
+}

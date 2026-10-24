@@ -1,0 +1,29 @@
+---
+source: crates/rhema-twformat/src/markup.rs
+expression: "tokenize_markup(\"<FI>grace <custom>kept</custom><Fi><RF>synthetic note<Rf>\")"
+---
+[
+    Italic(
+        [
+            Text(
+                "grace ",
+            ),
+            UnknownTag {
+                name: "custom",
+                raw: "<custom></custom>",
+                children: [
+                    Text(
+                        "kept",
+                    ),
+                ],
+            },
+        ],
+    ),
+    Note(
+        [
+            Text(
+                "synthetic note",
+            ),
+        ],
+    ),
+]

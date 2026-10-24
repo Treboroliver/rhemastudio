@@ -1,5 +1,15 @@
 # Changelog — RhemaStudio
 
+## [M1.3] — 2026-10-24
+
+### Concluído
+- Tokenizador tolerante de tags bíblicas para `Vec<Node>`, com suporte às tags confirmadas, preservação de tags desconhecidas e fechamento seguro de marcação desbalanceada.
+- Strong associado à última palavra contígua anterior (pontuação adjacente incluída); Strong consecutivos compartilham o trecho por aninhamento.
+- `plain_text`, `OntReader::verse_nodes` e `chapter_nodes`; opções `rhema-cli dump --parsed` e `--plain`.
+- Cobertura unitária e `proptest` de preservação textual, snapshots de versículos sintéticos e teste opcional de todos os versículos reais via `RHEMA_TEST_MODULES`.
+- Varredura release do `kjv.ont`: 31.102 versículos, zero `UnknownTag`, texto simples sem `<`/`>`; tokenização total em 463,9 ms. Confirmada a variante real `<WG####x>`.
+- Tags `<TS>`, `<CL>`, `<WT…>` e `<RX…>` permanecem marcadas **[VERIFICAR]** em `docs/02-formato-theword.md`.
+
 ## [M1.2] — 2026-10-18
 
 ### Concluído
