@@ -9,6 +9,7 @@ use clap::{Parser, Subcommand};
 use rusqlite::{Connection, OpenFlags};
 
 use rhema_core::{Book, VerseRef};
+use rhema_refs::{FormatStyle, Language, ParseOutcome};
 use rhema_twformat::{CommentarySource, DictionarySource, OntReader};
 
 #[derive(Parser)]
@@ -35,16 +36,20 @@ enum Commands {
         file: PathBuf,
 
         /// Número do livro canônico (1 a 66; ex: 43 para João)
-        #[arg(long)]
-        book: u8,
+        #[arg(long, conflicts_with = "reference")]
+        book: Option<u8>,
 
         /// Número do capítulo
-        #[arg(long)]
-        chapter: u16,
+        #[arg(long, conflicts_with = "reference")]
+        chapter: Option<u16>,
 
         /// Número do versículo
-        #[arg(long)]
-        verse: u16,
+        #[arg(long, conflicts_with = "reference")]
+        verse: Option<u16>,
+
+        /// Referência bíblica (ex.: "Jo 3:16")
+        #[arg(long = "ref")]
+        reference: Option<String>,
 
         /// Exibe a árvore de nós interpretada
         #[arg(long, conflicts_with = "plain")]
@@ -83,6 +88,15 @@ enum Commands {
         plain: bool,
     },
 
+    /// Resolve uma referência bíblica sem abrir um módulo
+    Ref {
+        /// Texto da referência
+        text: String,
+        /// Idioma das abreviações e sugestões
+        #[arg(long, default_value = "pt-BR", value_parser = ["pt-BR", "en"])]
+        lang: String,
+    },
+
     /// Grava amostras distribuídas do conteúdo RTF de um módulo SQLite em pasta temporária
     RtfSample {
         /// Caminho para arquivo de módulo SQLite (.twm)
@@ -104,9 +118,34 @@ fn main() -> Result<()> {
             book,
             chapter,
             verse,
+            reference,
             parsed,
             plain,
-        } => dump_verse(&file, book, chapter, verse, parsed, plain),
+        } => {
+            if let Some(reference) = reference {
+                let outcome = rhema_refs::parse(&reference, Language::PtBr);
+                if !outcome.erros.is_empty() {
+                    bail!("Referência inválida: {outcome:?}");
+                }
+                let range = outcome
+                    .faixas
+                    .first()
+                    .ok_or_else(|| anyhow::anyhow!("Referência não resolvida: {outcome:?}"))?;
+                dump_verse(
+                    &file,
+                    range.start.book.number(),
+                    range.start.chapter,
+                    range.start.verse,
+                    parsed,
+                    plain,
+                )
+            } else {
+                let (Some(book), Some(chapter), Some(verse)) = (book, chapter, verse) else {
+                    bail!("Informe --ref ou os três argumentos --book, --chapter e --verse");
+                };
+                dump_verse(&file, book, chapter, verse, parsed, plain)
+            }
+        }
         Commands::DumpCmt {
             file,
             book,
@@ -121,7 +160,51 @@ fn main() -> Result<()> {
             parsed,
             plain,
         } => dump_dictionary(&file, &key, parsed, plain),
+        Commands::Ref { text, lang } => {
+            let language = if lang == "en" {
+                Language::En
+            } else {
+                Language::PtBr
+            };
+            let outcome = rhema_refs::parse(&text, language);
+            print_parse_outcome(&outcome, language);
+            if outcome.faixas.is_empty() && outcome.erros.is_empty() && outcome.sugestões.is_empty()
+            {
+                bail!("A referência está incompleta; nenhuma faixa foi resolvida");
+            }
+            if !outcome.erros.is_empty() {
+                bail!("A referência contém erros");
+            }
+            Ok(())
+        }
         Commands::RtfSample { file, count } => rtf_sample(&file, count),
+    }
+}
+
+fn print_parse_outcome(outcome: &ParseOutcome, language: Language) {
+    for range in &outcome.faixas {
+        println!(
+            "{}",
+            rhema_refs::format(range, language, FormatStyle::Short)
+        );
+    }
+    for error in &outcome.erros {
+        println!("Erro: {error:?}");
+    }
+    for suggestion in &outcome.sugestões {
+        match suggestion.reference {
+            Some(reference) => println!(
+                "Sugestão: {}",
+                rhema_refs::format(&reference, language, FormatStyle::Short)
+            ),
+            None => println!(
+                "Sugestão: {}",
+                match language {
+                    Language::PtBr => suggestion.book.name_pt(),
+                    Language::En => suggestion.book.name_en(),
+                }
+            ),
+        }
     }
 }
 

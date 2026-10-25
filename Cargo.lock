@@ -2916,6 +2916,7 @@ dependencies = [
  "clap",
  "encoding_rs",
  "rhema-core",
+ "rhema-refs",
  "rhema-twformat",
  "rusqlite",
 ]
@@ -2935,6 +2936,10 @@ version = "0.1.0"
 [[package]]
 name = "rhema-refs"
 version = "0.1.0"
+dependencies = [
+ "proptest",
+ "rhema-core",
+]
 
 [[package]]
 name = "rhema-search"

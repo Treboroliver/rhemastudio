@@ -1,5 +1,14 @@
 # Changelog — RhemaStudio
 
+## [M2.1] — 2026-10-24
+
+### Concluído
+- Criada `rhema-refs` sem dependência de parsing pesada: resolução pt-BR/en, nomes e abreviações canônicas, dobra manual de acentos, numerais/ordinais, intervalos, listas, livros/capítulos inteiros, sugestões para entrada parcial e erros com limites canônicos.
+- Adicionado formatador curto/completo, com round-trip de referências de versículo; tabela TSV com 200 casos explícitos (120 válidos, 60 inválidos e 20 parciais), todos com resultado esperado; propriedades `proptest` cobrem entradas arbitrárias e ida-e-volta.
+- `rhema-cli ref '<texto>' [--lang en]` imprime resoluções, erros e sugestões; `rhema-cli dump <arquivo> --ref '<texto>'` aceita referência sem remover `--book/--chapter/--verse`.
+- Abreviações, sintaxe, exemplos e comportamento documentados em `docs/05-referencias.md`. M2.2 continua pendente.
+- Benchmark release do parser típico: 0,262 µs/op (10.000 iterações), abaixo do limite de 50 µs.
+
 ## [M1.4] — 2026-10-24
 
 ### Concluído
