@@ -746,6 +746,21 @@ fn kind_from_extension(path: &Path) -> ModuleKind {
     }
 }
 
+fn strip_kind_suffix(stem: &str) -> String {
+    let lower = stem.to_lowercase();
+    for suffix in [".dct", ".cmt", ".gbk", ".dev"] {
+        if lower.ends_with(suffix) {
+            // Os sufixos são ASCII, então o corte em bytes cai em fronteira de caractere.
+            let cut = stem.len() - suffix.len();
+            let trimmed = stem[..cut].trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+    }
+    stem.to_string()
+}
+
 fn module_info(
     path: &Path,
     identity: &FileIdentity,
@@ -757,6 +772,7 @@ fn module_info(
         .file_stem()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "Módulo".to_string());
+    let filename = strip_kind_suffix(&filename);
     let fallback = filename.clone();
     let is_bible = kind == ModuleKind::Bible;
     let (language, language_name) = metadata
@@ -931,8 +947,14 @@ mod tests {
                 .as_deref()
                 .is_some_and(|description| description.len() <= 200)
         );
-        assert_eq!(by_name["Synthetic.cmt.twm"].title, "Synthetic.cmt");
-        assert_eq!(by_name["Synthetic.dct.twm"].title, "Synthetic.dct");
+        assert_eq!(by_name["Synthetic.cmt.twm"].title, "Synthetic");
+        assert_eq!(
+            strip_kind_suffix("Mickelson's Strong.dct"),
+            "Mickelson's Strong"
+        );
+        assert_eq!(strip_kind_suffix("acf2007"), "acf2007");
+        assert_eq!(strip_kind_suffix(".dct"), ".dct");
+        assert_eq!(by_name["Synthetic.dct.twm"].title, "Synthetic");
     }
 
     #[test]

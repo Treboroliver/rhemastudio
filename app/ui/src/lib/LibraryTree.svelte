@@ -48,6 +48,7 @@
         {#each modules.filter((module) => groupFor(module.kind) === group.id) as module}
           {@const status = stateMessage(module)}
           {@const isBible = module.kind === 'Bible'}
+          {@const meta = [module.abbreviation, module.language_name].filter((part) => part && part !== 'undefined').join(' · ')}
           {@const selectable = isBible && isReady(module)}
           <button
             class:active={module.id === activeBibleId}
@@ -67,14 +68,14 @@
           >
             <span class="item-main">
               <span class="item-title">{module.title}</span>
-              <span class="item-meta">{module.abbreviation ?? ''}{module.language_name ? ` · ${module.language_name}` : ''}</span>
+              {#if meta}<span class="item-meta">{meta}</span>{/if}
               {#if status === 'protected'}<span class="item-warning">🔒 {t('protectedMessage')}</span>{/if}
               {#if status === 'unsupported'}<span class="item-warning">{t('unsupportedMessage')}</span>{/if}
               {#if status === 'corrupted'}<span class="item-warning subtle">{t('corruptedMessage')}</span>{/if}
             </span>
           </button>
         {:else}
-          <p class="empty-group">{t('emptyGroup')}</p>
+          <p class="empty-group">{t(group.id === 'books' ? 'emptyBooks' : 'emptyGroup')}</p>
         {/each}
       </div>
     </section>

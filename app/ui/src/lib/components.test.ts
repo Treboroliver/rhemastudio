@@ -39,6 +39,7 @@ const labels: Record<string, string> = {
   corruptedMessage: 'Este módulo não pôde ser lido.',
   ready: 'Pronto',
   emptyGroup: 'Nenhum módulo encontrado',
+  emptyBooks: 'Nenhum livro na biblioteca',
   loading: 'Carregando biblioteca…'
 }
 
@@ -133,6 +134,16 @@ describe('FirstRunWizard', () => {
 })
 
 describe('LibraryTree', () => {
+  it('shows the empty-books label and omits missing metadata', () => {
+    const bare = { ...moduleInfo('bare', 'Dictionary', 'Ready', 'Sem metadados'), abbreviation: null, language: null, language_name: null }
+    const { container } = render(LibraryTree, {
+      props: { t, modules: [bare], activeBibleId: null, loading: false, onSelect: vi.fn(), onManageFolders: vi.fn(), onRefresh: vi.fn() }
+    })
+    expect(screen.getByText('Nenhum livro na biblioteca')).toBeTruthy()
+    expect(container.querySelector('.item-meta')).toBeNull()
+    expect(container.textContent).not.toContain('undefined')
+  })
+
   it('groups modules by type and exposes ready, protected, unsupported, and corrupted states', async () => {
     const onSelect = vi.fn()
     const modules = [

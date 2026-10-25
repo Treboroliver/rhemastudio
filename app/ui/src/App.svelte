@@ -201,7 +201,6 @@
         <div class="brand-mark" aria-hidden="true">R</div>
         <div><h1>{t('appName')}</h1><p>{t('tagline')}</p></div>
       </div>
-      <span class="offline-badge">{t('offline')}</span>
     </header>
     <main class="workspace">
       <LibraryTree
@@ -222,7 +221,6 @@
           <div class="empty-reading">
             <div class="empty-book" aria-hidden="true">▤</div>
             <h2>{t('selectBible')}</h2>
-            <p>{t('selectBibleHint')}</p>
           </div>
         {/if}
       </section>
