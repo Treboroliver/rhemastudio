@@ -9,6 +9,7 @@ use clap::{Parser, Subcommand};
 use rusqlite::{Connection, OpenFlags};
 
 use rhema_core::{Book, VerseRef};
+use rhema_library::{Library, ModuleInfo, ModuleState};
 use rhema_refs::{FormatStyle, Language, ParseOutcome};
 use rhema_twformat::{CommentarySource, DictionarySource, OntReader};
 
@@ -24,6 +25,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Gerencia o catálogo de módulos
+    Library {
+        #[command(subcommand)]
+        command: LibraryCommands,
+    },
+
     /// Inspeciona a estrutura, DDL, metadados e tags de um módulo
     Inspect {
         /// Caminho para o arquivo (.twm, .ont, .ot, .nt, etc.)
@@ -108,10 +115,35 @@ enum Commands {
     },
 }
 
+#[derive(Subcommand)]
+enum LibraryCommands {
+    /// Varre pastas e atualiza o catálogo local de módulos
+    Scan {
+        /// Pastas a percorrer (profundidade máxima de seis níveis)
+        #[arg(required = true)]
+        folders: Vec<PathBuf>,
+
+        /// Imprime o catálogo em JSON
+        #[arg(long)]
+        json: bool,
+
+        /// Pasta de dados/cache do catálogo
+        #[arg(long)]
+        cache: Option<PathBuf>,
+    },
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Library { command } => match command {
+            LibraryCommands::Scan {
+                folders,
+                json,
+                cache,
+            } => scan_library(&folders, cache.as_deref(), json),
+        },
         Commands::Inspect { file } => inspect_file(&file),
         Commands::Dump {
             file,
@@ -179,6 +211,99 @@ fn main() -> Result<()> {
         }
         Commands::RtfSample { file, count } => rtf_sample(&file, count),
     }
+}
+
+fn scan_library(folders: &[PathBuf], cache_dir: Option<&Path>, json: bool) -> Result<()> {
+    let cache_dir = match cache_dir {
+        Some(path) => path.to_path_buf(),
+        None => default_library_cache_dir()?,
+    };
+    let library = Library::new(cache_dir);
+    let started = std::time::Instant::now();
+    let result = library.scan(folders, |_| {})?;
+    let elapsed = started.elapsed();
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "elapsed_ms": elapsed.as_secs_f64() * 1000.0,
+                "cache_hits": result.cache_hits,
+                "modules": result.modules,
+                "warnings": result.warnings,
+            }))?
+        );
+    } else {
+        println!("Nome\tTipo\tEstado\tIdioma\tTamanho (bytes)");
+        for module in &result.modules {
+            println!(
+                "{}\t{}\t{}\t{}\t{}",
+                table_cell(&module.title),
+                module_kind_label(module),
+                module_state_label(&module.state),
+                table_cell(module.language.as_deref().unwrap_or("-")),
+                module.size
+            );
+        }
+        for warning in &result.warnings {
+            eprintln!("Aviso: {}: {}", warning.path.display(), warning.message);
+        }
+        println!(
+            "Varredura: {:.2} ms; {} módulo(s) do cache.",
+            elapsed.as_secs_f64() * 1000.0,
+            result.cache_hits
+        );
+    }
+    Ok(())
+}
+
+fn table_cell(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if matches!(character, '\t' | '\r' | '\n') {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect()
+}
+
+fn module_kind_label(module: &ModuleInfo) -> &'static str {
+    match module.kind {
+        rhema_core::ModuleKind::Bible => "Bíblia",
+        rhema_core::ModuleKind::Commentary => "Comentário",
+        rhema_core::ModuleKind::Dictionary => "Dicionário",
+        rhema_core::ModuleKind::Book => "Livro",
+        rhema_core::ModuleKind::Devotional => "Devocional",
+        rhema_core::ModuleKind::Unknown => "Outro",
+    }
+}
+
+fn module_state_label(state: &ModuleState) -> &'static str {
+    match state {
+        ModuleState::Ready => "Pronto",
+        ModuleState::Protected => "Protegido",
+        ModuleState::UnsupportedFormat { .. } => "FormatoNaoSuportado (em breve)",
+        ModuleState::Corrupted { .. } => "Corrompido",
+    }
+}
+
+fn default_library_cache_dir() -> Result<PathBuf> {
+    #[cfg(windows)]
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .context("LOCALAPPDATA não está definido; informe --cache")?;
+    #[cfg(not(windows))]
+    let base = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .map(|home| home.join(".local").join("share"))
+        })
+        .context("Diretório de dados do usuário indisponível; informe --cache")?;
+    Ok(base.join("RhemaStudio").join("library"))
 }
 
 fn print_parse_outcome(outcome: &ParseOutcome, language: Language) {

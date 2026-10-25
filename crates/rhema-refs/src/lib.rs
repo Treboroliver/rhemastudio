@@ -712,8 +712,11 @@ mod tests {
     fn benchmark_typical_reference_parse() {
         let start = std::time::Instant::now();
         for _ in 0..10_000 {
-            let result = parse("Jo 3:16-18; 4:1,3", Language::PtBr);
-            assert!(result.erros.is_empty());
+            let result = std::hint::black_box(parse(
+                std::hint::black_box("Jo 3:16-18; 4:1,3"),
+                Language::PtBr,
+            ));
+            assert!(std::hint::black_box(&result).erros.is_empty());
         }
         eprintln!(
             "M2.1 parse típico: {:.3} µs/op",

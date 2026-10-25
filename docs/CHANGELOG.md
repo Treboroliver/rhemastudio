@@ -7,7 +7,17 @@
 - Adicionado formatador curto/completo, com round-trip de referências de versículo; tabela TSV com 200 casos explícitos (120 válidos, 60 inválidos e 20 parciais), todos com resultado esperado; propriedades `proptest` cobrem entradas arbitrárias e ida-e-volta.
 - `rhema-cli ref '<texto>' [--lang en]` imprime resoluções, erros e sugestões; `rhema-cli dump <arquivo> --ref '<texto>'` aceita referência sem remover `--book/--chapter/--verse`.
 - Abreviações, sintaxe, exemplos e comportamento documentados em `docs/05-referencias.md`. M2.2 continua pendente.
-- Benchmark release do parser típico: 0,262 µs/op (10.000 iterações), abaixo do limite de 50 µs.
+- Benchmark release do parser típico, refeito com `std::hint::black_box`: 0,255 µs/op (10.000 iterações), abaixo do limite de 50 µs.
+
+## [M2.2] — 2026-10-24
+
+### Concluído
+- `rhema-library` percorre pastas em até seis níveis sem seguir links, classifica candidatos por assinatura/extensão, ignora `.exe`/`.zip` e mantém erros de arquivo como estado Corrompido sem parar as demais entradas.
+- Metadados baratos para Bíblia e `.twm`; nas Bíblias são lidas de trás para frente apenas as linhas contíguas de propriedades, sem reter versículos. SQLite permanece somente leitura, flags de proteção são verificadas antes de `config`, apenas chaves permitidas são selecionadas e `about`/`content` nunca são consultados.
+- Cache `catalog-<hash>.json` por pasta sob diretório de dados configurável, invalidação por caminho/tamanho/mtime, reparo de cache inválido, atualização temporária+rename e callback de progresso.
+- CLI `rhema-cli library scan <pasta...> [--json] [--cache <pasta>]` lista catálogo, tempo e contagem de entradas reaproveitadas do cache. Pastas Windows padrão detectam `C:\ProgramData\The Word`.
+- Testes sintéticos cobrem classes, proteção, inválidos/vazios/truncados, links simbólicos quando disponíveis, pasta ausente, invalidação/reparo do cache e 50 módulos com reabertura release em 8,97 ms. `.gbk`/`.dev` seguem como FormatoNaoSuportado; M2.3/M2.4 não iniciadas.
+- Não havia `RHEMA_TEST_MODULES` definida nesta execução; a tabela/tempos de módulos reais ficaram sem medição.
 
 ## [M1.4] — 2026-10-24
 

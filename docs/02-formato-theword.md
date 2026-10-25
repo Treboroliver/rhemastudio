@@ -28,7 +28,7 @@ Locais comuns no Windows: `C:\ProgramData\The Word\` (subpastas de Bíblias e Li
 - Após o último versículo, bloco de **propriedades** `chave=valor` (título, descrição, abreviação, data de versão, idioma, etc.).
 - Contagem esperada de linhas de versículos (Confirmado no `kjv.ont`): `.ot` = 23.145 · `.nt` = 7.957 · `.ont` = 31.102.
 - O primeiro versículo do `.nt` é Mateus 1:1; do `.ot`/`.ont`, Gênesis 1:1.
-- Codificação: a codificação segue estritamente a propriedade `charset` do módulo (`0` = ANSI Windows-1252, `65001` = UTF-8, etc.); **UTF-8 não pode ser presumido** (o theWord tem raízes em Windows/Delphi e usa Windows-1252 como padrão histórico). Se a propriedade `charset` for desconhecida ou ausente: tentar UTF-8, depois Windows-1252 como fallback, e registrar um aviso no log. Confirmado no `kjv.ont` (`charset=0`).
+- Codificação: a codificação segue a propriedade `charset` do módulo (`0` = ANSI Windows-1252, `65001` = UTF-8, etc.); **UTF-8 não pode ser presumido** (o theWord tem raízes em Windows/Delphi e usa Windows-1252 como padrão histórico). Se a propriedade `charset` for desconhecida ou ausente: tentar UTF-8 e, se inválido, Windows-1252 como fallback. Confirmado no `kjv.ont` (`charset=0`).
 
 ### 2.2 Mapeamento linha → referência
 Usar tabela canônica de versículos por capítulo (versificação padrão protestante, 66 livros). A tabela vive em `rhema-core` como dado estático e é validada por teste: soma = 31.102.
@@ -172,6 +172,23 @@ pub trait BibleSource {
 - `.ont`: mapear arquivo em memória (`memmap2`) e indexar **offsets de linha** na abertura (≈31 mil inteiros). Verso sob demanda; nada de carregar tudo em `String`.
 - `.twm`: conexão SQLite somente leitura, `PRAGMA query_only=ON`, statements preparados em cache.
 - Catálogo de módulos em cache (`catalog.json` por pasta, invalidado por mtime/tamanho) para abertura instantânea.
+
+## 6.1 Biblioteca, classificação e metadados (M2.2)
+
+`rhema_library::Library::scan(pastas, callback)` percorre pastas com profundidade máxima 6, sem seguir links simbólicos. Só considera `.ont`, `.ot`, `.nt`, `.ontx` e `.twm`; arquivos `.exe`, `.zip` e demais extensões são ignorados. A assinatura e a extensão precisam concordar: as Bíblias são texto, `.twm` é SQLite e `.ontx` é protegido (`TWENCBMOD`); uma assinatura incompatível resulta em estado corrompido, sem interromper a varredura. No Windows, `default_folders()` usa `C:\ProgramData\The Word` quando existe; Linux/macOS não presumem diretório de módulos.
+
+Cada `ModuleInfo` do catálogo tem id determinístico calculado de caminho, tamanho e data de modificação; caminho, tipo, estado, título, abreviação, idioma, descrição curta, versão, tamanho e indicador Strong. Bíblia: percorre de trás para frente somente as linhas contíguas de propriedades no final, retendo as chaves de metadados selecionadas e limitando seus valores a 200 caracteres; as linhas dos versículos não são retidas. `.twm`: abre SQLite estritamente somente para leitura, chama `ensure_twm_unprotected` antes de consultar `config`, ativa `PRAGMA query_only=ON` e consulta apenas chaves necessárias via `SELECT` filtrado e `substr(value, 1, 200)`. A chave `about` nunca é consultada; nenhuma tabela `content` é lida.
+
+Estados do catálogo:
+
+| Estado | Significado |
+|---|---|
+| `Ready` / **Pronto** | Bíblia (`.ont/.ot/.nt`), comentário (`.cmt.twm`) ou dicionário (`.dct.twm`) reconhecido e não protegido |
+| `Protected` / **Protegido** | extensão `.ontx`, assinatura protegida ou flag `do.encrypt=1`/`secure=1`; nenhum conteúdo é acessado |
+| `UnsupportedFormat` / **Formato não suportado (em breve)** | livros `.gbk.twm`, devocionais `.dev.twm` e outros tipos `.twm` ainda não lidos |
+| `Corrupted` / **Corrompido** | arquivo vazio/truncado, assinatura/schema inválido ou erro de leitura; a varredura continua |
+
+O catálogo `catalog-<hash-da-pasta>.json` fica sob a pasta de dados configurada pelo chamador. Cache por módulo é reutilizado quando caminho, tamanho e mtime coincidem; cache inválido é reconstruído. A atualização usa arquivo temporário no mesmo diretório e rename. A CLI oferece `rhema-cli library scan <pasta...> [--json] [--cache <pasta>]`, lista nome/tipo/estado/idioma/tamanho, duração e quantidade de entradas aproveitadas do cache. O callback recebe a contagem de módulos reconhecidos até então.
 
 ## 7. Fixtures e testes
 - `tools/gen-fixtures` gera módulos **sintéticos**: um `.ont` mínimo com todas as tags, um `.twm` de comentário e um de dicionário (após M1.1).

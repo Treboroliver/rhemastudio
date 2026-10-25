@@ -41,8 +41,9 @@ Marque `[x]` ao concluir. Cada milestone só termina quando **todos** os critér
 
 ## M2 — Biblioteca e referências
 - [x] M2.1 `rhema-refs`: parser pt-BR/en (`Jo 3:16-18`, `1Co 13`, `Sl 23:1-6; 27:1`, `Gn 1.1`, nomes completos, sem acento)
-  - Concluído: validação pelo cânon, referências parciais, intervalos entre capítulos, listas, sugestões, formatação curta/completa, CLI `ref` e `dump --ref`; 200 casos expandidos da tabela de dados, testes de propriedade e dobra manual de acentos. Ver `docs/05-referencias.md`.
-- [ ] M2.2 `rhema-library`: varredura de pastas, classificação, cache de catálogo
+  - Concluído: validação pelo cânon, referências parciais, intervalos entre capítulos, listas, sugestões, formatação curta/completa, CLI `ref` e `dump --ref`; 200 casos explícitos, testes de propriedade e dobra manual de acentos. Ver `docs/05-referencias.md`.
+- [x] M2.2 `rhema-library`: varredura de pastas, classificação, cache de catálogo
+  - Concluído: varredura sem seguir links (máximo seis níveis), estados Pronto/Protegido/FormatoNaoSuportado/Corrompido, metadados sem ler conteúdo, cache JSON atômico invalidado por caminho/tamanho/mtime, progresso e CLI `library scan`. `.gbk` e `.dev` permanecem listados como "em breve".
 - [ ] M2.3 Tela de primeiro uso: achar módulos automaticamente ou escolher pasta
 - [ ] M2.4 Árvore de biblioteca na interface
 
