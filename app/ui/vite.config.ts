@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import tailwindcss from '@tailwindcss/vite'
 
@@ -8,4 +8,21 @@ export default defineConfig({
     svelte(),
     tailwindcss(),
   ],
+  resolve: {
+    conditions: ['browser'],
+  },
+  ssr: {
+    resolve: {
+      conditions: ['browser'],
+    },
+  },
+  test: {
+    environment: 'jsdom',
+    environmentOptions: {
+      jsdom: {
+        customExportConditions: ['browser'],
+      },
+    },
+    include: ['src/**/*.test.ts'],
+  },
 })

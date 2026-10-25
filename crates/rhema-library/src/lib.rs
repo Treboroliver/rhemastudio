@@ -13,9 +13,9 @@ use walkdir::WalkDir;
 
 const SQLITE_MAGIC: &[u8] = b"SQLite format 3\0";
 const TW_ENCRYPTED_MAGIC: &[u8] = b"TWENCBMOD";
-const BIBLE_PROPERTIES_MAX_BYTES: u64 = 1024 * 1024;
-const BIBLE_PROPERTY_LINE_MAX_BYTES: usize = 8 * 1024;
+const BIBLE_PROPERTIES_MAX_BYTES: u64 = 16 * 1024 * 1024;
 const BIBLE_PROPERTY_READ_CHUNK_BYTES: usize = 4 * 1024;
+const BIBLE_TRAILING_NONPROPERTY_LINES_MAX: usize = 64;
 const METADATA_VALUE_MAX_CHARS: usize = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,6 +35,7 @@ pub struct ModuleInfo {
     pub title: String,
     pub abbreviation: Option<String>,
     pub language: Option<String>,
+    pub language_name: Option<String>,
     pub description: Option<String>,
     pub version: Option<String>,
     pub size: u64,
@@ -139,7 +140,7 @@ impl Library {
             let cache_path = self.cache_path(folder);
             let catalog = read_catalog(&cache_path);
             let mut next_catalog = FolderCatalog {
-                version: 1,
+                version: 2,
                 modules: BTreeMap::new(),
             };
 
@@ -223,6 +224,20 @@ impl Library {
         Ok(result)
     }
 
+    pub fn list_cached(&self, folders: &[PathBuf]) -> Vec<ModuleInfo> {
+        let mut modules = BTreeMap::new();
+        for folder in folders {
+            let catalog = read_catalog(&self.cache_path(folder));
+            modules.extend(
+                catalog
+                    .modules
+                    .into_iter()
+                    .map(|(path, cached)| (path, cached.info)),
+            );
+        }
+        modules.into_values().collect()
+    }
+
     fn cache_path(&self, folder: &Path) -> PathBuf {
         let key = stable_hash(folder.to_string_lossy().as_bytes());
         self.data_dir.join(format!("catalog-{key:016x}.json"))
@@ -235,7 +250,7 @@ fn read_catalog(path: &Path) -> FolderCatalog {
     };
     serde_json::from_slice::<FolderCatalog>(&bytes)
         .ok()
-        .filter(|catalog| catalog.version == 1)
+        .filter(|catalog| catalog.version == 2)
         .unwrap_or_default()
 }
 
@@ -370,28 +385,54 @@ fn read_bible_metadata(file: &mut File, size: u64) -> Result<Metadata, String> {
     let mut cursor = size;
     let mut scanned = 0_u64;
     let mut properties = Vec::new();
+    let mut skipped_footer_lines = 0;
     while cursor > 0 && scanned < BIBLE_PROPERTIES_MAX_BYTES {
-        let previous_cursor = cursor;
-        let Some(line) = read_previous_line(file, &mut cursor)? else {
+        let Some((line_start, line_end)) = read_previous_line_range(file, &mut cursor)? else {
             break;
         };
-        scanned = scanned.saturating_add(previous_cursor - cursor);
-        let line = trim_ascii(&line);
+        scanned = scanned.saturating_add(line_end.saturating_sub(line_start) + 1);
+        let line_prefix = read_file_prefix(file, line_start, line_end, 256)?;
+        let line = trim_ascii(&line_prefix);
         if line.is_empty() {
             continue;
         }
-        let Some((raw_key, raw_value)) = line.split_once_byte(b'=') else {
+        let Some(separator) = line.iter().position(|byte| *byte == b'=') else {
+            if is_trailing_nonproperty(&line_prefix)
+                && skipped_footer_lines < BIBLE_TRAILING_NONPROPERTY_LINES_MAX
+            {
+                skipped_footer_lines += 1;
+                continue;
+            }
             break;
         };
-        let key = trim_ascii(raw_key);
+        let key = trim_ascii(&line[..separator]);
         if key.is_empty()
             || !key
                 .iter()
                 .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(byte))
         {
+            if is_trailing_nonproperty(&line_prefix)
+                && skipped_footer_lines < BIBLE_TRAILING_NONPROPERTY_LINES_MAX
+            {
+                skipped_footer_lines += 1;
+                continue;
+            }
             break;
         }
-        properties.push((key.to_ascii_lowercase(), trim_ascii(raw_value).to_vec()));
+        let key = key.to_ascii_lowercase();
+        let key_name = std::str::from_utf8(&key).map_err(|error| error.to_string())?;
+        if !is_metadata_key(key_name) {
+            continue;
+        }
+        let leading_whitespace = line_prefix.len() - line_prefix.trim_ascii_start().len();
+        let value_start = line_start + (leading_whitespace + separator + 1) as u64;
+        let value = read_file_prefix(
+            file,
+            value_start,
+            line_end,
+            METADATA_VALUE_MAX_CHARS as u64 * 4,
+        )?;
+        properties.push((key, trim_ascii(&value).to_vec()));
     }
 
     let charset = properties
@@ -407,17 +448,15 @@ fn read_bible_metadata(file: &mut File, size: u64) -> Result<Metadata, String> {
         let value = decode_metadata_value(&value_bytes, charset.as_deref());
         props.insert(key, value);
     }
+    let short_title = props.get("short.title").cloned();
+    let description = props
+        .get("description")
+        .map(|value| value.chars().take(80).collect::<String>());
     let metadata = Metadata {
-        title: props
-            .get("title")
-            .or_else(|| props.get("short.title"))
-            .cloned(),
-        abbreviation: props
-            .get("abbrev")
-            .or_else(|| props.get("short.title"))
-            .cloned(),
+        title: description.clone().or_else(|| short_title.clone()),
+        abbreviation: short_title,
         language: props.get("lang").cloned(),
-        description: props.get("description").cloned(),
+        description,
         version: props
             .get("version.date")
             .or_else(|| props.get("version.major"))
@@ -434,6 +473,11 @@ fn read_bible_metadata(file: &mut File, size: u64) -> Result<Metadata, String> {
     Ok(metadata)
 }
 
+fn is_trailing_nonproperty(line: &[u8]) -> bool {
+    line.first()
+        .is_some_and(|byte| *byte == b'<' || *byte == b'#' || byte.is_ascii_whitespace())
+}
+
 fn decode_metadata_value(bytes: &[u8], charset: Option<&[u8]>) -> String {
     let decoded = match charset {
         Some(b"65001") => UTF_8.decode(bytes).0.into_owned(),
@@ -446,36 +490,50 @@ fn decode_metadata_value(bytes: &[u8], charset: Option<&[u8]>) -> String {
     decoded.chars().take(METADATA_VALUE_MAX_CHARS).collect()
 }
 
-fn read_previous_line(file: &mut File, cursor: &mut u64) -> Result<Option<Vec<u8>>, String> {
-    let mut suffix = Vec::new();
-    while *cursor > 0 {
-        let start = cursor.saturating_sub(BIBLE_PROPERTY_READ_CHUNK_BYTES as u64);
-        let chunk_len = (*cursor - start) as usize;
+fn read_previous_line_range(
+    file: &mut File,
+    cursor: &mut u64,
+) -> Result<Option<(u64, u64)>, String> {
+    if *cursor == 0 {
+        return Ok(None);
+    }
+    let end = *cursor;
+    let mut position = end;
+    while position > 0 {
+        let start = position.saturating_sub(BIBLE_PROPERTY_READ_CHUNK_BYTES as u64);
+        let chunk_len = (position - start) as usize;
         file.seek(SeekFrom::Start(start))
             .map_err(|error| error.to_string())?;
         let mut chunk = vec![0; chunk_len];
         file.read_exact(&mut chunk)
             .map_err(|error| error.to_string())?;
-        if let Some(newline) = chunk.iter().rposition(|byte| *byte == b'\n') {
-            let mut line = chunk[newline + 1..].to_vec();
-            line.extend(suffix);
-            *cursor = start + newline as u64;
-            if line.len() > BIBLE_PROPERTY_LINE_MAX_BYTES {
-                return Ok(None);
-            }
-            if line.last() == Some(&b'\r') {
-                line.pop();
-            }
-            return Ok(Some(line));
+        if let Some(newline) = chunk
+            .iter()
+            .rposition(|byte| *byte == b'\n' || *byte == b'\r')
+        {
+            let separator = start + newline as u64;
+            *cursor = separator;
+            return Ok(Some((separator + 1, end)));
         }
-        if chunk.len() + suffix.len() > BIBLE_PROPERTY_LINE_MAX_BYTES {
-            return Ok(None);
-        }
-        chunk.extend(suffix);
-        suffix = chunk;
-        *cursor = start;
+        position = start;
+        *cursor = position;
     }
-    Ok(Some(suffix))
+    Ok(Some((0, end)))
+}
+
+fn read_file_prefix(
+    file: &mut File,
+    start: u64,
+    end: u64,
+    max_len: u64,
+) -> Result<Vec<u8>, String> {
+    let length = end.saturating_sub(start).min(max_len) as usize;
+    file.seek(SeekFrom::Start(start))
+        .map_err(|error| error.to_string())?;
+    let mut bytes = vec![0; length];
+    file.read_exact(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    Ok(bytes)
 }
 
 fn trim_ascii(bytes: &[u8]) -> &[u8] {
@@ -507,18 +565,6 @@ fn is_metadata_key(key: &str) -> bool {
             | "verse.rule"
             | "charset"
     )
-}
-
-trait SplitOnceByte {
-    fn split_once_byte(&self, separator: u8) -> Option<(&[u8], &[u8])>;
-}
-
-impl SplitOnceByte for [u8] {
-    fn split_once_byte(&self, separator: u8) -> Option<(&[u8], &[u8])> {
-        self.iter()
-            .position(|byte| *byte == separator)
-            .map(|index| (&self[..index], &self[index + 1..]))
-    }
 }
 
 fn classify_twm(path: &Path, identity: &FileIdentity) -> ModuleInfo {
@@ -707,22 +753,50 @@ fn module_info(
     state: ModuleState,
     metadata: Metadata,
 ) -> ModuleInfo {
-    let fallback = path
+    let filename = path
         .file_stem()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "Módulo".to_string());
+    let fallback = filename.clone();
+    let is_bible = kind == ModuleKind::Bible;
+    let (language, language_name) = metadata
+        .language
+        .as_deref()
+        .map(normalize_language)
+        .map(|(code, name)| (Some(code.to_string()), Some(name.to_string())))
+        .unwrap_or((None, None));
     ModuleInfo {
         id: identity.id.clone(),
         path: path.to_path_buf(),
         kind,
         state,
         title: metadata.title.unwrap_or(fallback),
-        abbreviation: metadata.abbreviation,
-        language: metadata.language,
+        abbreviation: if is_bible {
+            metadata.abbreviation.or(Some(filename))
+        } else {
+            metadata.abbreviation
+        },
+        language,
+        language_name,
         description: metadata.description,
         version: metadata.version,
         size: identity.size,
         has_strong: metadata.has_strong,
+    }
+}
+
+fn normalize_language(value: &str) -> (&str, &str) {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "por" | "pt" | "pt-br" | "pt_br" | "br" => ("pt", "Português"),
+        "eng" | "en" | "en-us" | "en-gb" => ("en", "Inglês"),
+        "grc" | "el" | "el-gr" => ("gr", "Grego"),
+        "heb" | "he" | "he-il" => ("he", "Hebraico"),
+        "spa" | "es" | "es-es" | "es-mx" => ("es", "Espanhol"),
+        "fra" | "fre" | "fr" => ("fr", "Francês"),
+        "deu" | "ger" | "de" => ("de", "Alemão"),
+        "ita" | "it" => ("it", "Italiano"),
+        "rus" | "ru" => ("ru", "Russo"),
+        _ => (value.trim(), value.trim()),
     }
 }
 
@@ -840,19 +914,16 @@ mod tests {
             by_name["Synthetic.gbk.twm"].abbreviation.as_deref(),
             Some("SINT")
         );
-        assert_eq!(
-            by_name["Synthetic.gbk.twm"].language.as_deref(),
-            Some("por")
-        );
+        assert_eq!(by_name["Synthetic.gbk.twm"].language.as_deref(), Some("pt"));
         assert!(by_name["Synthetic.gbk.twm"].has_strong);
         assert_eq!(
             by_name["Synthetic.gbk.twm"].version.as_deref(),
             Some("2026-01-01")
         );
         let bible = by_name["Synthetic.ont"];
-        assert_eq!(bible.title, "Módulo Degradado de Teste");
+        assert_eq!(bible.title, "DEG");
         assert_eq!(bible.abbreviation.as_deref(), Some("DEG"));
-        assert_eq!(bible.language.as_deref(), Some("por"), "{bible:?}");
+        assert_eq!(bible.language.as_deref(), Some("pt"), "{bible:?}");
         assert!(bible.description.is_none());
         assert!(
             by_name["Synthetic.gbk.twm"]
@@ -893,12 +964,12 @@ mod tests {
         let temp = tempdir().expect("tempdir");
         let modules = temp.path().join("modules");
         fs::create_dir(&modules).expect("module dir");
-        let bytes = "Versículo sintético\n\ntitle = Bíblia de Teste\nshort.title = TST\nlang = por\ncharset = 0\nuntranslated.strong.format = 1\n";
+        let bytes = "Versículo sintético\n\ndescription = Bíblia de Teste\nshort.title = TST\nlang = por\ncharset = 0\nuntranslated.strong.format = 1\n";
         let (encoded, _, _) = WINDOWS_1252.encode(bytes);
         fs::write(modules.join("charset.ont"), encoded).expect("write module");
         fs::write(
             modules.join("utf8.ont"),
-            "Versículo sintético\n\ntitle = Bíblia com UTF-8\nshort.title = UTF\n",
+            "Versículo sintético\n\ndescription = Bíblia com UTF-8\nshort.title = UTF\n",
         )
         .expect("write utf8 module");
         let scan = library(temp.path()).scan(&[modules], |_| {}).expect("scan");
@@ -910,11 +981,105 @@ mod tests {
             .expect("Windows-1252 metadata");
         assert_eq!(module.title, "Bíblia de Teste");
         assert_eq!(module.abbreviation.as_deref(), Some("TST"));
-        assert_eq!(module.language.as_deref(), Some("por"));
+        assert_eq!(module.language.as_deref(), Some("pt"));
         assert!(module.has_strong);
         assert!(scan.modules.iter().any(|module| {
             module.title == "Bíblia com UTF-8" && module.abbreviation.as_deref() == Some("UTF")
         }));
+    }
+
+    #[test]
+    fn bible_metadata_uses_readable_title_language_and_keeps_duplicates() {
+        let temp = tempdir().expect("tempdir");
+        let modules = temp.path().join("modules");
+        fs::create_dir(&modules).expect("module dir");
+
+        let description = "Descrição legível ".repeat(8);
+        let props = format!("description = {description}\r\nshort.title = TST\r\nlang = br\r\n");
+        let first = modules.join("first.ont");
+        generate_synthetic_degraded(&first, 1).expect("first Bible");
+        OpenOptions::new()
+            .append(true)
+            .open(&first)
+            .expect("append first metadata")
+            .write_all(props.as_bytes())
+            .expect("write first metadata");
+
+        let second = modules.join("second.ont");
+        generate_synthetic_degraded(&second, 2).expect("second Bible");
+        OpenOptions::new()
+            .append(true)
+            .open(&second)
+            .expect("append second metadata")
+            .write_all(props.as_bytes())
+            .expect("write second metadata");
+
+        let no_description = modules.join("fallback.ont");
+        generate_synthetic_degraded(&no_description, 1).expect("fallback Bible");
+        OpenOptions::new()
+            .append(true)
+            .open(&no_description)
+            .expect("append fallback metadata")
+            .write_all(b"short.title = CURTA\r\nlang = eng\r\n")
+            .expect("write fallback metadata");
+
+        let filename_fallback = modules.join("filename.ont");
+        fs::write(&filename_fallback, b"synthetic verse\n\nlang = xyz\r\n")
+            .expect("write filename fallback Bible");
+
+        let scan = library(temp.path())
+            .scan(std::slice::from_ref(&modules), |_| {})
+            .expect("scan");
+        assert_eq!(scan.modules.len(), 4);
+        let first_info = scan
+            .modules
+            .iter()
+            .find(|module| module.path == first)
+            .unwrap();
+        assert_eq!(first_info.title.chars().count(), 80);
+        assert_eq!(first_info.abbreviation.as_deref(), Some("TST"));
+        assert_eq!(first_info.language.as_deref(), Some("pt"));
+        assert_eq!(first_info.language_name.as_deref(), Some("Português"));
+        let second_info = scan
+            .modules
+            .iter()
+            .find(|module| module.path == second)
+            .unwrap();
+        assert_eq!(second_info.title, first_info.title);
+        assert_ne!(second_info.size, first_info.size);
+        assert_eq!(first_info.path.parent(), second_info.path.parent());
+        let fallback = scan
+            .modules
+            .iter()
+            .find(|module| module.path == no_description)
+            .unwrap();
+        assert_eq!(fallback.title, "CURTA");
+        assert_eq!(fallback.abbreviation.as_deref(), Some("CURTA"));
+        assert_eq!(fallback.language.as_deref(), Some("en"));
+        assert_eq!(fallback.language_name.as_deref(), Some("Inglês"));
+        let filename = scan
+            .modules
+            .iter()
+            .find(|module| module.path == filename_fallback)
+            .unwrap();
+        assert_eq!(filename.title, "filename");
+        assert_eq!(filename.abbreviation.as_deref(), Some("filename"));
+        assert_eq!(filename.language.as_deref(), Some("xyz"));
+        assert_eq!(filename.language_name.as_deref(), Some("xyz"));
+    }
+
+    #[test]
+    fn normalizes_supported_language_aliases_and_preserves_unknown_codes() {
+        for alias in ["por", "pt", "pt-BR", "br"] {
+            assert_eq!(normalize_language(alias), ("pt", "Português"));
+        }
+        for alias in ["eng", "en"] {
+            assert_eq!(normalize_language(alias), ("en", "Inglês"));
+        }
+        assert_eq!(normalize_language("grc"), ("gr", "Grego"));
+        assert_eq!(normalize_language("heb"), ("he", "Hebraico"));
+        assert_eq!(normalize_language("spa"), ("es", "Espanhol"));
+        assert_eq!(normalize_language("xyz"), ("xyz", "xyz"));
     }
 
     #[test]
@@ -1103,7 +1268,7 @@ mod tests {
             "strong_amg2.dct.twm",
             "mickelson's strong.dct.twm",
         ];
-        eprintln!("Nome\tTipo\tEstado\tIdioma\tBytes");
+        eprintln!("Nome\tTipo\tEstado\tIdioma");
 
         let expectations = [
             ("ara+.ont", ModuleKind::Bible, ModuleState::Ready),
@@ -1142,15 +1307,31 @@ mod tests {
             });
             if let Some(module) = found {
                 eprintln!(
-                    "{}\t{:?}\t{:?}\t{}\t{}",
+                    "{}\t{:?}\t{:?}\t{}",
                     name,
                     module.kind,
                     module.state,
-                    module.language.as_deref().unwrap_or("-"),
-                    module.size
+                    module.language.as_deref().unwrap_or("-")
                 );
                 assert_eq!(module.kind, kind, "tipo inesperado em {name}");
                 assert_eq!(module.state, state, "estado inesperado em {name}");
+                if matches!(name, "ara+.ont" | "kjv.ont") {
+                    let filename = module
+                        .path
+                        .file_stem()
+                        .map(|stem| stem.to_string_lossy())
+                        .unwrap_or_default();
+                    assert_ne!(
+                        module.title, filename,
+                        "título de exibição ausente em {name}"
+                    );
+                    assert!(
+                        !module.title.contains('\u{fffd}'),
+                        "título inválido em {name}"
+                    );
+                    assert!(module.title.chars().count() <= 80);
+                    assert!(module.language.is_some(), "idioma ausente em {name}");
+                }
             } else {
                 eprintln!("{name}\tNão encontrado");
             }

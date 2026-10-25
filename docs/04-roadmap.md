@@ -44,8 +44,10 @@ Marque `[x]` ao concluir. Cada milestone só termina quando **todos** os critér
   - Concluído: validação pelo cânon, referências parciais, intervalos entre capítulos, listas, sugestões, formatação curta/completa, CLI `ref` e `dump --ref`; 200 casos explícitos, testes de propriedade e dobra manual de acentos. Ver `docs/05-referencias.md`.
 - [x] M2.2 `rhema-library`: varredura de pastas, classificação, cache de catálogo
   - Concluído: varredura sem seguir links (máximo seis níveis), estados Pronto/Protegido/FormatoNaoSuportado/Corrompido, metadados sem ler conteúdo, cache JSON atômico invalidado por caminho/tamanho/mtime, progresso e CLI `library scan`. `.gbk` e `.dev` permanecem listados como "em breve".
-- [ ] M2.3 Tela de primeiro uso: achar módulos automaticamente ou escolher pasta
-- [ ] M2.4 Árvore de biblioteca na interface
+- [x] M2.3 Tela de primeiro uso: achar módulos automaticamente ou escolher pasta
+  - Concluído: fluxo de três passos, seleção múltipla de pastas, varredura com progresso, resumo de módulos e seleção opcional da Bíblia padrão; preferências em `settings.json` com validação e gravação atômica.
+- [x] M2.4 Árvore de biblioteca na interface
+  - Concluído: biblioteca ligada ao catálogo Rust, agrupada por tipo, seleção persistente de Bíblia, aviso para módulos protegidos/não suportados/corrompidos, dicas com caminho e navegação por teclado.
 
 **Aceite:** ≥ 95% dos casos de uma tabela de 200 referências de teste resolvem corretamente; ao abrir o app pela primeira vez, módulos instalados aparecem agrupados por tipo; módulo corrompido aparece com aviso, sem travar.
 
