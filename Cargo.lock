@@ -121,6 +121,8 @@ dependencies = [
  "log",
  "rhema-core",
  "rhema-library",
+ "rhema-refs",
+ "rhema-twformat",
  "serde",
  "serde_json",
  "tauri",

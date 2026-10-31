@@ -21,11 +21,16 @@ export interface ModuleInfo {
 }
 
 export interface AppSettings {
+  schema_version: number
   module_folders: string[]
   default_bible_id: string | null
+  selected_bible_ids: string[]
   interface_language: 'pt-BR' | 'en'
-  theme: 'dark' | 'light'
+  theme: 'dark' | 'light' | 'auto'
+  show_strong_numbers: boolean
+  bible_font_size: number
   first_use_completed: boolean
+  last_passage?: { book: number; chapter: number; verse?: number | null } | null
 }
 
 export function isReady(module: ModuleInfo): boolean {

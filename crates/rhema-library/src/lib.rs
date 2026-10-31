@@ -66,8 +66,13 @@ pub struct Library {
     data_dir: PathBuf,
 }
 
+/// Versão do formato e das regras de metadados gravadas no catalog.json.
+/// Qualquer alteração em como títulos ou metadados são calculados exige incrementar este valor.
+pub const CATALOG_VERSION: u32 = 3;
+
 #[derive(Debug, Serialize, Deserialize, Default)]
 struct FolderCatalog {
+    #[serde(default)]
     version: u32,
     modules: BTreeMap<String, CachedModule>,
 }
@@ -140,7 +145,7 @@ impl Library {
             let cache_path = self.cache_path(folder);
             let catalog = read_catalog(&cache_path);
             let mut next_catalog = FolderCatalog {
-                version: 2,
+                version: CATALOG_VERSION,
                 modules: BTreeMap::new(),
             };
 
@@ -250,7 +255,7 @@ fn read_catalog(path: &Path) -> FolderCatalog {
     };
     serde_json::from_slice::<FolderCatalog>(&bytes)
         .ok()
-        .filter(|catalog| catalog.version == 2)
+        .filter(|catalog| catalog.version == CATALOG_VERSION)
         .unwrap_or_default()
 }
 
@@ -1174,6 +1179,57 @@ mod tests {
             invalidated.modules[0].title,
             "changed metadata with a longer value"
         );
+    }
+
+    #[test]
+    fn cache_with_old_or_missing_version_is_rebuilt() {
+        let temp = tempdir().expect("tempdir");
+        let modules = temp.path().join("modules");
+        fs::create_dir(&modules).expect("module dir");
+        sqlite_twm(&modules.join("cache.dct.twm"), "1");
+        let library = library(temp.path());
+        library
+            .scan(std::slice::from_ref(&modules), |_| {})
+            .expect("cold scan");
+        let cache_file = fs::read_dir(temp.path().join("user-data"))
+            .expect("cache directory")
+            .next()
+            .expect("cache file")
+            .expect("cache entry")
+            .path();
+        let original: serde_json::Value =
+            serde_json::from_slice(&fs::read(&cache_file).expect("read cache")).expect("json");
+        assert_eq!(original["version"], CATALOG_VERSION);
+
+        let mut old = original.clone();
+        old["version"] = serde_json::json!(CATALOG_VERSION - 1);
+        fs::write(&cache_file, serde_json::to_vec(&old).expect("encode")).expect("old cache");
+        let rebuilt = library
+            .scan(std::slice::from_ref(&modules), |_| {})
+            .expect("rebuild old cache");
+        assert_eq!(rebuilt.cache_hits, 0);
+        assert!(library.list_cached(std::slice::from_ref(&modules)).len() == 1);
+
+        let mut unversioned = original;
+        unversioned
+            .as_object_mut()
+            .expect("object")
+            .remove("version");
+        fs::write(
+            &cache_file,
+            serde_json::to_vec(&unversioned).expect("encode"),
+        )
+        .expect("unversioned cache");
+        assert!(
+            library
+                .list_cached(std::slice::from_ref(&modules))
+                .is_empty()
+        );
+        let rebuilt = library
+            .scan(std::slice::from_ref(&modules), |_| {})
+            .expect("rebuild unversioned cache");
+        assert_eq!(rebuilt.cache_hits, 0);
+        assert_eq!(rebuilt.modules.len(), 1);
     }
 
     #[test]

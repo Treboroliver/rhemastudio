@@ -1,5 +1,44 @@
 # Changelog — RhemaStudio
 
+## [M3b] — 2026-10-31
+
+### Concluído
+- Leitura paralela até quatro Bíblias: adição por botão ou Ctrl+K, remoção por coluna, ativação Alt+1..4, seleção comum e alinhamento por número; erros e ausências ficam isolados por coluna. Janela abaixo de 900 px mostra no máximo duas colunas.
+- Backend `get_chapters` reaproveita o cache de seis leitores e retorna linhas alinhadas com conteúdo/erro por coluna. Teste de componente usa 176 linhas sintéticas pesadas em quatro colunas e lotes iniciais de 20 linhas; montagem integral no jsdom: 421,59 ms nesta execução.
+- Release com ARA+ e KJV: 1.189 capítulos alinhados, 0 capítulos com contagens diferentes; média 0,669 ms e máximo 11,940 ms por capítulo. Sem casos divergentes para listar.
+- Configurações versão 2: colunas, Strong, fonte e tema; configurações antigas carregam com padrões. Strong fica sem sublinhado permanente por padrão, realça em foco/hover e mostra o tracejado âmbar com Ctrl+Shift+S; a ação de clique permanece para M4.
+- Fonte bíblica de 14–32 px (padrão 20), com atalhos; temas escuro, claro e automático por tokens CSS e teste de contraste mínimo 4,5:1.
+- Checklist manual atualizado. Sem conteúdo bíblico real em novos fixtures, testes, capturas ou documentação.
+
+### Em aberto
+- Executar validação manual no app com usuários e módulos reais.
+
+## [M3a.1] — 2026-10-25
+
+### Concluído
+- Tokenizador: `<` e `>` que não formam tag válida são preservados como texto literal; formas mistas (`<palavra<WGn>`) tokenizam corretamente. Testes sintéticos por padrão e proptest atualizado.
+- Interface: removida a limpeza de `<`/`>`; o texto do módulo chega intacto.
+- Capítulo parcialmente ausente: versículos existentes + aviso discreto (`ChapterDto.incomplete`).
+- `BiblePane`: foco e rolagem até versículos ainda não montados (lotes), `aria-setsize`/`aria-posinset`; vitest com capítulo sintético de 176 versículos.
+- Testes Rust: palavras de Jesus da KJV (João 3:3) chegam como `wordsOfJesus`.
+- Novo `docs/03-verificacao-manual.md`.
+
+### Resultados (RHEMA_TEST_MODULES, release)
+- ARA+: 40 `<`/`>` literais em 19 capítulos (esperado zero não se cumpre: são literais do módulo), 1 `UnknownTag`. KJV: 0 e 0.
+
+### Em aberto
+- Significado dos 40 sinais literais da ARA+; tag gramatical órfã em 2Co 7:8; Ctrl+K com teclado real (ver checklist manual).
+
+## [M3a] — 2026-10-24
+
+### Concluído
+- `CATALOG_VERSION` (3) em `rhema-library`: cache de versão diferente ou ausente é reconstruído.
+- Backend Tauri: `get_chapter` (spawn_blocking, cache LRU de 6 leitores), `resolve_reference`, `book_names`, `set_last_passage`, com erros de código estável e conversão `Node` → `UiNode`.
+- Interface: `BiblePane` (versículos em lotes, seleção por clique/setas), `NodeView` sem `{@html}`, notas de rodapé acessíveis, palavras de Jesus, Strong com sublinhado (sem ação até a M4), `CommandBar` (Ctrl+K), navegação por capítulo (Ctrl+←/→) entre livros, histórico (Alt+←/→, 100 posições) e última passagem lembrada.
+- Testes: Rust (um por tipo de nó, cache LRU, NT sintético, protegido, 1.189 capítulos da ARA+ e KJV sem pânico e sem `<`/`>`) e vitest (nós, painel, barra de comandos, histórico, navegação).
+- Release: ARA+ média 0,63 ms/máx. 8,8 ms; KJV média 0,48 ms/máx. 5,9 ms. Capturas com texto inventado em `app/ui/screenshots/`.
+- Achado: 19 capítulos da ARA+ têm `<`/`>` soltos vindos do tokenizador; removidos na conversão para a interface.
+
 ## [M2.3–M2.4] — 2026-10-24
 
 ### Concluído

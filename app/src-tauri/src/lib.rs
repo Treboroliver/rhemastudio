@@ -4,31 +4,58 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rhema_core::ModuleKind;
+use rhema_core::{Book, ModuleKind};
 use rhema_library::{Library, ModuleInfo, ModuleState};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use thiserror::Error;
 
+mod reader;
+
+use reader::{ApiError, BookInfo, ChapterDto, READER_CACHE_CAPACITY, ReaderCache, ResolveDto};
+
+fn legacy_schema_version() -> u32 {
+    1
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LastPassage {
+    pub book: u8,
+    pub chapter: u16,
+    pub verse: Option<u16>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct AppSettings {
+    #[serde(default = "legacy_schema_version")]
+    pub schema_version: u32,
     pub module_folders: Vec<PathBuf>,
     pub default_bible_id: Option<String>,
+    pub selected_bible_ids: Vec<String>,
     pub interface_language: String,
     pub theme: String,
+    pub show_strong_numbers: bool,
+    pub bible_font_size: u8,
     pub first_use_completed: bool,
+    pub last_passage: Option<LastPassage>,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            schema_version: 2,
             module_folders: Vec::new(),
             default_bible_id: None,
+            selected_bible_ids: Vec::new(),
             interface_language: "pt-BR".to_string(),
             theme: "dark".to_string(),
+            show_strong_numbers: false,
+            bible_font_size: 20,
             first_use_completed: false,
+            last_passage: None,
         }
     }
 }
@@ -43,8 +70,14 @@ enum CommandError {
     InvalidLanguage,
     #[error("O tema escolhido não é válido.")]
     InvalidTheme,
+    #[error("Selecione no máximo quatro Bíblias prontas.")]
+    InvalidSelectedBibles,
+    #[error("O tamanho da fonte deve estar entre 14 e 32 px.")]
+    InvalidFontSize,
     #[error("A Bíblia padrão precisa ser uma Bíblia pronta da biblioteca.")]
     InvalidDefaultBible,
+    #[error("A última passagem lida não é válida.")]
+    InvalidPassage,
     #[error("Não foi possível atualizar a biblioteca: {0}")]
     Library(String),
     #[error("Não foi possível abrir o seletor de pastas: {0}")]
@@ -56,6 +89,7 @@ struct AppState {
     settings_path: PathBuf,
     settings: Mutex<AppSettings>,
     catalog: Mutex<Vec<ModuleInfo>>,
+    readers: Arc<ReaderCache>,
 }
 
 impl AppState {
@@ -82,8 +116,18 @@ impl AppState {
 
 fn load_settings(path: &Path) -> Result<AppSettings, CommandError> {
     match fs::read(path) {
-        Ok(bytes) => serde_json::from_slice(&bytes)
-            .map_err(|error| CommandError::Settings(format!("arquivo inválido: {error}"))),
+        Ok(bytes) => {
+            let mut settings: AppSettings = serde_json::from_slice(&bytes)
+                .map_err(|error| CommandError::Settings(format!("arquivo inválido: {error}")))?;
+            if settings.schema_version < 2 {
+                settings.schema_version = 2;
+                let encoded = serde_json::to_vec_pretty(&settings)
+                    .map_err(|error| CommandError::Settings(error.to_string()))?;
+                atomic_write(path, &encoded)
+                    .map_err(|error| CommandError::Settings(error.to_string()))?;
+            }
+            Ok(settings)
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(AppSettings::default()),
         Err(error) => Err(CommandError::Settings(error.to_string())),
     }
@@ -159,20 +203,54 @@ fn validate_folder(path: &Path) -> Result<(), CommandError> {
     }
 }
 
+fn validate_passage(passage: &LastPassage) -> Result<(), CommandError> {
+    let book = Book::from_number(passage.book).ok_or(CommandError::InvalidPassage)?;
+    let verses = book
+        .verses_in_chapter(passage.chapter)
+        .ok_or(CommandError::InvalidPassage)?;
+    match passage.verse {
+        Some(verse) if verse == 0 || verse > verses => Err(CommandError::InvalidPassage),
+        _ => Ok(()),
+    }
+}
+
 fn validate_settings(
     mut settings: AppSettings,
     current_catalog: &[ModuleInfo],
 ) -> Result<AppSettings, CommandError> {
+    if let Some(passage) = &settings.last_passage {
+        validate_passage(passage)?;
+    }
     for folder in &settings.module_folders {
         validate_folder(folder)?;
     }
     settings.module_folders.sort();
     settings.module_folders.dedup();
+    settings.schema_version = 2;
     if !matches!(settings.interface_language.as_str(), "pt-BR" | "en") {
         return Err(CommandError::InvalidLanguage);
     }
-    if !matches!(settings.theme.as_str(), "dark" | "light") {
+    if !matches!(settings.theme.as_str(), "dark" | "light" | "auto") {
         return Err(CommandError::InvalidTheme);
+    }
+    if settings.bible_font_size < 14 || settings.bible_font_size > 32 {
+        return Err(CommandError::InvalidFontSize);
+    }
+    let mut selected = std::collections::HashSet::new();
+    settings
+        .selected_bible_ids
+        .retain(|id| selected.insert(id.clone()));
+    if settings.selected_bible_ids.len() > 4 {
+        return Err(CommandError::InvalidSelectedBibles);
+    }
+    if settings.selected_bible_ids.iter().any(|id| {
+        !current_catalog.iter().any(|module| {
+            module.id == *id
+                && module.kind == ModuleKind::Bible
+                && module.state == ModuleState::Ready
+        })
+    }) {
+        return Err(CommandError::InvalidSelectedBibles);
     }
     if let Some(id) = &settings.default_bible_id
         && !current_catalog.iter().any(|module| {
@@ -258,6 +336,97 @@ fn library_list(state: State<'_, AppState>) -> Result<Vec<ModuleInfo>, String> {
 }
 
 #[tauri::command]
+async fn get_chapter(
+    module_id: String,
+    book: u8,
+    chapter: u16,
+    state: State<'_, AppState>,
+) -> Result<ChapterDto, ApiError> {
+    let module = state
+        .catalog
+        .lock()
+        .map_err(|_| ApiError::internal("catálogo indisponível"))?
+        .iter()
+        .find(|module| module.id == module_id)
+        .cloned()
+        .ok_or_else(|| ApiError {
+            code: "module_not_found",
+            message: "Módulo não encontrado na biblioteca.".into(),
+            book: None,
+            max: None,
+        })?;
+    let readers = Arc::clone(&state.readers);
+    tauri::async_runtime::spawn_blocking(move || {
+        reader::read_chapter(&readers, &module, book, chapter)
+    })
+    .await
+    .map_err(|error| ApiError::internal(error.to_string()))?
+}
+
+#[tauri::command]
+async fn get_chapters(
+    module_ids: Vec<String>,
+    book: u8,
+    chapter: u16,
+    state: State<'_, AppState>,
+) -> Result<reader::AlignedChaptersDto, ApiError> {
+    let modules = {
+        let catalog = state
+            .catalog
+            .lock()
+            .map_err(|_| ApiError::internal("catálogo indisponível"))?;
+        module_ids
+            .iter()
+            .map(|module_id| {
+                catalog
+                    .iter()
+                    .find(|module| module.id == *module_id)
+                    .cloned()
+                    .ok_or_else(|| {
+                        ApiError::new("module_not_found", "Módulo não encontrado na biblioteca.")
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    if modules.len() > 4 {
+        return Err(ApiError::new(
+            "invalid_reference",
+            "A leitura paralela aceita no máximo quatro Bíblias.",
+        ));
+    }
+    let readers = Arc::clone(&state.readers);
+    tauri::async_runtime::spawn_blocking(move || {
+        reader::read_chapters(&readers, &modules, book, chapter)
+    })
+    .await
+    .map_err(|error| ApiError::internal(error.to_string()))?
+}
+
+#[tauri::command]
+fn resolve_reference(text: String, lang: String) -> ResolveDto {
+    reader::resolve_reference(&text, &lang)
+}
+
+#[tauri::command]
+fn book_names(lang: String) -> Vec<BookInfo> {
+    reader::book_names(&lang)
+}
+
+#[tauri::command]
+fn set_last_passage(
+    passage: LastPassage,
+    state: State<'_, AppState>,
+) -> Result<AppSettings, String> {
+    validate_passage(&passage).map_err(|error| error.to_string())?;
+    let mut settings = state.settings().map_err(|error| error.to_string())?;
+    settings.last_passage = Some(passage);
+    state
+        .save_settings(settings.clone())
+        .map_err(|error| error.to_string())?;
+    Ok(settings)
+}
+
+#[tauri::command]
 fn library_default_folders() -> Vec<PathBuf> {
     Library::default_folders()
 }
@@ -305,6 +474,7 @@ pub fn run() {
                 settings_path,
                 settings: Mutex::new(settings),
                 catalog: Mutex::new(cached),
+                readers: Arc::new(ReaderCache::new(READER_CACHE_CAPACITY)),
             });
             Ok(())
         })
@@ -314,7 +484,12 @@ pub fn run() {
             library_default_folders,
             settings_get,
             settings_set,
-            pick_folders
+            pick_folders,
+            get_chapter,
+            get_chapters,
+            resolve_reference,
+            book_names,
+            set_last_passage
         ])
         .run(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -368,6 +543,26 @@ mod tests {
     }
 
     #[test]
+    fn legacy_settings_load_with_versioned_defaults() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{"module_folders":[],"default_bible_id":null,"interface_language":"pt-BR","theme":"dark","first_use_completed":true}"#,
+        )
+        .expect("write legacy settings");
+        let settings = load_settings(&path).expect("load legacy settings");
+        assert_eq!(settings.schema_version, 2);
+        assert!(settings.selected_bible_ids.is_empty());
+        assert!(!settings.show_strong_numbers);
+        assert_eq!(settings.bible_font_size, 20);
+        assert_eq!(settings.theme, "dark");
+        let persisted = fs::read_to_string(path).expect("read migrated settings");
+        assert!(persisted.contains("\"schema_version\": 2"));
+        assert!(persisted.contains("\"selected_bible_ids\": []"));
+    }
+
+    #[test]
     fn settings_reject_invalid_values_and_missing_folders() {
         let temp = tempfile::tempdir().expect("tempdir");
         let settings = AppSettings {
@@ -401,6 +596,55 @@ mod tests {
         assert!(matches!(
             validate_settings(settings, &[ready_bible()]),
             Err(CommandError::InvalidDefaultBible)
+        ));
+    }
+
+    #[test]
+    fn settings_validate_parallel_columns_font_and_auto_theme() {
+        let bibles = ["bible-1", "bible-2", "bible-3", "bible-4", "bible-5"]
+            .into_iter()
+            .map(|id| {
+                let mut module = ready_bible();
+                module.id = id.into();
+                module
+            })
+            .collect::<Vec<_>>();
+        let valid = AppSettings {
+            theme: "auto".into(),
+            selected_bible_ids: vec!["bible-2".into(), "bible-1".into()],
+            default_bible_id: Some("bible-2".into()),
+            ..AppSettings::default()
+        };
+        let validated = validate_settings(valid, &bibles).expect("valid parallel settings");
+        assert_eq!(validated.schema_version, 2);
+        assert_eq!(validated.selected_bible_ids, ["bible-2", "bible-1"]);
+
+        let too_many = AppSettings {
+            selected_bible_ids: bibles.iter().map(|module| module.id.clone()).collect(),
+            ..AppSettings::default()
+        };
+        assert!(matches!(
+            validate_settings(too_many, &bibles),
+            Err(CommandError::InvalidSelectedBibles)
+        ));
+        let invalid_font = AppSettings {
+            bible_font_size: 33,
+            ..AppSettings::default()
+        };
+        assert!(matches!(
+            validate_settings(invalid_font, &bibles),
+            Err(CommandError::InvalidFontSize)
+        ));
+        let protected = AppSettings {
+            selected_bible_ids: vec!["locked".into()],
+            ..AppSettings::default()
+        };
+        let mut locked = ready_bible();
+        locked.id = "locked".into();
+        locked.state = ModuleState::Protected;
+        assert!(matches!(
+            validate_settings(protected, &[locked]),
+            Err(CommandError::InvalidSelectedBibles)
         ));
     }
 

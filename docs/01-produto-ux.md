@@ -29,13 +29,13 @@ Um software de estudo bíblico **moderno, leve e simples**, que abre os módulos
 ### MVP (v0.1) — "Ler e estudar"
 - Descobrir e listar módulos instalados (pasta do theWord ou pasta escolhida).
 - Ler Bíblia por capítulo; trocar de tradução mantendo o versículo.
-- Bíblias paralelas (até 4 colunas).
+- Bíblias paralelas (até 4 colunas), alinhadas por versículo e com seleção comum.
 - Barra de comandos com referências em português (`Jo 3:16-18`, `1Co 13`, `Sl 23`).
 - Clique em número de Strong → painel do léxico (módulo de dicionário).
 - Comentários seguem o versículo selecionado.
 - Referências cruzadas em chips clicáveis; passar o mouse mostra o texto.
 - Busca por palavra/frase na tradução ativa e por número de Strong.
-- Tema escuro e claro; tamanho de fonte ajustável.
+- Tema escuro, claro ou automático; tamanho de fonte ajustável no leitor.
 
 ### v0.2 — "Preparar o sermão"
 - Editor de sermão em blocos: título, texto-base, pontos, ilustrações, aplicações.
@@ -76,6 +76,8 @@ Conta de usuário, nuvem própria, IA generativa embutida, apócrifos/versifica�
 | `Ctrl+Shift+P` | Janela de projeção |
 | `Ctrl+←/→` | Capítulo anterior / seguinte |
 | `Alt+1..4` | Alternar tradução paralela |
+| `Ctrl+Shift+S` | Mostrar/ocultar números de Strong |
+| `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Aumentar / diminuir / restaurar fonte bíblica |
 | `Ctrl+B` | Mostrar/ocultar biblioteca |
 | `Ctrl+Enter` | Inserir seleção no sermão |
 | `/` no editor | Menu de inserção (versículo, léxico, nota) |
@@ -86,7 +88,7 @@ Conta de usuário, nuvem própria, IA generativa embutida, apócrifos/versifica�
 - Destaque âmbar `#d97706` / `#fbbf24` (reverente, quente)
 - Chips de referência em azul `#60a5fa`
 - Texto bíblico: fonte serifada (ex.: Source Serif 4); interface: sans-serif legível (ex.: IBM Plex Sans)
-- Número de Strong: sublinhado tracejado âmbar; hover com fundo âmbar translúcido
+- Número de Strong: oculto por padrão; hover/foco com realce discreto e cursor de ponteiro. O interruptor mostra o sublinhado tracejado âmbar; o clique será ligado na M4.
 
 ## 8. Acessibilidade e idioma
 

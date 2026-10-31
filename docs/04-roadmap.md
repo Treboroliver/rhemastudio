@@ -54,14 +54,16 @@ Marque `[x]` ao concluir. Cada milestone só termina quando **todos** os critér
 ---
 
 ## M3 — Leitura (MVP visual)
-- [ ] M3.1 `BiblePane` virtualizado, tipografia serifada, versículo selecionável
-- [ ] M3.2 Renderização de `Node` (itálico, palavras de Jesus, títulos, notas)
-- [ ] M3.3 `CommandBar` (Ctrl+K): ir para referência, alternar módulo
-- [ ] M3.4 Bíblias paralelas (até 4)
-- [ ] M3.5 Navegação por capítulo (setas, atalhos), histórico voltar/avançar
-- [ ] M3.6 Temas claro/escuro e tamanho de fonte
+- [x] M3.1 `BiblePane` com montagem em lotes (virtualização só se necessário), tipografia serifada, versículo selecionável
+- [x] M3.2 Renderização de `Node` (itálico, palavras de Jesus, títulos, notas)
+- [x] M3.3 `CommandBar` (Ctrl+K): ir para referência, alternar módulo
+- [x] M3.4 Bíblias paralelas (até 4), alinhadas por número, seleção comum e erros isolados por coluna; adicionadas por botão/barra de comandos, removidas por cabeçalho, Alt+1..4 ativa a principal e as colunas restauram das configurações. Abaixo de 900 px, no máximo duas ficam visíveis.
+- [x] M3.5 Navegação por capítulo (setas, atalhos), histórico voltar/avançar
+- [x] M3a.1 Correções da leitura (tokenizador `<`/`>`, capítulo parcial, lotes); checklist manual em `docs/03-verificacao-manual.md`
+- [x] M3.6 Temas escuro/claro/automático, tokens CSS com contraste validado por teste, tamanho do texto de 14–32 px (padrão 20) e configurações versionadas/migradas.
+- [x] M3b Strong: oculto por padrão, realce em hover/foco e interruptor persistente; clique continua sem ação até M4.
 
-**Aceite:** do app aberto a "João 3:16 em 2 traduções lado a lado" em ≤ 5 interações; capítulo abre em < 30 ms; Playwright cobre o fluxo.
+**Aceite:** do app aberto a duas Bíblias lado a lado em ≤ 5 interações; leitura paralela alinhada e responsiva validada por Vitest; capítulo abre em < 30 ms.
 
 ---
 

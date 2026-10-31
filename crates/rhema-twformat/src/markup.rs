@@ -64,6 +64,13 @@ pub fn tokenize_markup(input: &str) -> Vec<Node> {
             break;
         };
         let end = start + relative_end;
+        let mut start = start;
+        // Um "<" antes de outro "<" sem ">" entre eles não abre tag: é texto literal.
+        if let Some(inner) = input[start + 1..end].rfind('<') {
+            let tag_start = start + 1 + inner;
+            append_text(&mut root, &mut stack, &input[start..tag_start]);
+            start = tag_start;
+        }
         let raw_tag = &input[start..=end];
         let contents = &input[start + 1..end];
 
@@ -729,6 +736,39 @@ mod tests {
         assert_eq!(plain_text(&tokenize_markup("a < b")), "a < b");
     }
 
+    fn has_unknown(nodes: &[Node]) -> bool {
+        nodes.iter().any(|node| match node {
+            Node::UnknownTag { .. } => true,
+            Node::Italic(children)
+            | Node::WordsOfJesus(children)
+            | Node::Strong { children, .. } => has_unknown(children),
+            _ => false,
+        })
+    }
+
+    #[test]
+    fn loose_angle_brackets_before_tags_stay_literal_text() {
+        // Padrões da ARA+: "<[palavra]<WGn>", "<[palavra] [palavra]<WGn>", ">" inicial e "<" final.
+        for (input, text) in [
+            ("<word<WG25>", "<word"),
+            ("<word one<WG25> two", "<word one two"),
+            ("one, <word<WG25><G5656> two", "one, <word two"),
+            ("><word<WG25> end<", "><word end<"),
+            ("a > b<WG25>", "a > b"),
+            ("<<WG25>", "<"),
+            ("<<<CM>x", "<<x"),
+        ] {
+            let nodes = tokenize_markup(input);
+            assert_eq!(visible_text(&nodes), text, "{input}");
+            assert!(!has_unknown(&nodes), "{input}");
+        }
+        let nodes = tokenize_markup("<word<WG25>");
+        assert!(matches!(
+            nodes.as_slice(),
+            [Node::Text(_), Node::Strong { num: 25, .. }] | [Node::Strong { num: 25, .. }]
+        ));
+    }
+
     #[test]
     fn synthetic_markup_snapshots() {
         insta::assert_debug_snapshot!(
@@ -762,7 +802,11 @@ mod tests {
                     expected.push_str(&input[start..]);
                     break;
                 };
-                cursor = start + end_offset + 1;
+                let end = start + end_offset;
+                if let Some(inner) = input[start + 1..end].rfind('<') {
+                    expected.push_str(&input[start..start + 1 + inner]);
+                }
+                cursor = end + 1;
             }
             prop_assert_eq!(visible_text(&nodes), expected);
         }

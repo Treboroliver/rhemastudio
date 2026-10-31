@@ -190,7 +190,28 @@ Estados do catálogo:
 | `UnsupportedFormat` / **Formato não suportado (em breve)** | livros `.gbk.twm`, devocionais `.dev.twm` e outros tipos `.twm` ainda não lidos |
 | `Corrupted` / **Corrompido** | arquivo vazio/truncado, assinatura/schema inválido ou erro de leitura; a varredura continua |
 
-O catálogo `catalog-<hash-da-pasta>.json` fica sob a pasta de dados configurada pelo chamador. Cache por módulo é reutilizado quando caminho, tamanho e mtime coincidem; cache inválido é reconstruído. A atualização usa arquivo temporário no mesmo diretório e rename. A CLI oferece `rhema-cli library scan <pasta...> [--json] [--cache <pasta>]`, lista nome/tipo/estado/idioma/tamanho, duração e quantidade de entradas aproveitadas do cache. O callback recebe a contagem de módulos reconhecidos até então.
+O catálogo `catalog-<hash-da-pasta>.json` fica sob a pasta de dados configurada pelo chamador e grava `CATALOG_VERSION` (hoje 3); cache de versão diferente ou sem versão é descartado e reconstruído sem erro. Cache por módulo é reutilizado quando caminho, tamanho e mtime coincidem; cache inválido é reconstruído. A atualização usa arquivo temporário no mesmo diretório e rename. A CLI oferece `rhema-cli library scan <pasta...> [--json] [--cache <pasta>]`, lista nome/tipo/estado/idioma/tamanho, duração e quantidade de entradas aproveitadas do cache. O callback recebe a contagem de módulos reconhecidos até então.
+
+## 6.2 Leitura do texto bíblico na interface (M3a)
+
+Comandos Tauri (`app/src-tauri/src/reader.rs`), todos com erro serializável `{code, message, book?, max?}`; a interface traduz o `code`:
+
+| Comando | Resultado |
+|---|---|
+| `get_chapter(module_id, book, chapter)` | `ChapterDto{module_id, book, chapter, verses:[{number, nodes}]}`; roda em `spawn_blocking`; o módulo é procurado no catálogo em memória pelo id (a interface nunca envia caminhos) |
+| `resolve_reference(text, lang)` | faixas (com `whole` para capítulo inteiro), erros com `max` e sugestões do `rhema-refs` |
+| `book_names(lang)` | 66 livros com número, nome, abreviação, capítulos e testamento |
+| `set_last_passage(passage)` | grava a última passagem lida em `settings.json` (a interface usa debounce de 500 ms) |
+
+Códigos de erro: `module_protected`, `module_not_found`, `module_corrupted`, `module_unsupported`, `book_not_in_module` (ex.: Bíblia só NT pedindo Gênesis), `verse_not_found`, `invalid_reference`, `io_error`, `internal`. Módulos protegidos, não prontos ou que não são Bíblia são rejeitados sem abrir o arquivo. Leitores abertos ficam em cache LRU de 6 módulos (`Arc<OntReader>`, aberto fora do lock), sem recarregar o módulo a cada capítulo.
+
+Representação `UiNode` (JSON, `type` em camelCase): `text`, `italic`, `bold`, `underline`, `strikethrough`, `caps`, `superscript`, `subscript`, `wordsOfJesus`, `otQuote`, `heading{level}`, `strong{lang,num,children}`, `note`, `link`, `paragraph`, `lineBreak`. `Grammar`, `Morph` e `XRef` são descartados; `UnknownTag` vira só os filhos; `<` e `>` que fazem parte do texto do módulo chegam à interface **sem alteração** (a interface nunca altera o texto). A interface renderiza somente por componentes Svelte (`{@html}` proibido). Palavras com Strong têm sublinhado tracejado âmbar **sem ação**: a M4 ligará o clique ao verbete; `link` também ainda não tem ação.
+
+`ChapterDto.incomplete` é verdadeiro quando faltam versículos no capítulo: os existentes são devolvidos e a interface mostra o aviso "Alguns versículos não existem nesta Bíblia". Só se nenhum versículo existir o erro é `verse_not_found`.
+
+Tokenizador (M3a.1): em 19 capítulos da ARA+ (livros 40, 41, 42, 43, 44, 45 e 62; 2 ocorrências por capítulo, 4 em Mc 9) havia `<` soltos antes de uma palavra com Strong (`<palavra<WGn>`, também com mais de uma palavra ou vírgula antes), `>` solto no início do versículo e `<` final sem `>`. Correção na origem: se entre o `<` e o `>` há outro `<`, o trecho até o `<` interno é texto literal e a tag começa no último `<`. Resultado (tokenizando as duas Bíblias inteiras): ARA+ 40 sinais literais em 19 capítulos (preservados de propósito; semântica desconhecida, talvez marca de texto disputado) e 1 `UnknownTag` (tag gramatical órfã `(<G…>` em 2Co 7:8, sem Strong anterior); KJV 0 sinais e 0 `UnknownTag`. Na KJV, João 3:3 chega à interface com nós `wordsOfJesus` (cor própria); a ARA+ não tem essa marcação.
+
+Desempenho (release, Rust, todos os 1.189 capítulos, sem erros e sem `<`/`>` após a conversão): ARA+ média 0,63 ms, máximo 8,8 ms (Gn 1, inclui abrir o arquivo); KJV média 0,48 ms, máximo 5,9 ms. Interface: capítulos com muitos versículos são montados em lotes de 20 por quadro; com 176 versículos (Salmo 119, versículos sintéticos pesados) a primeira pintura levou cerca de 15–21 ms e a montagem completa em torno de 150 ms, sem bloquear a rolagem.
 
 ## 7. Fixtures e testes
 - `tools/gen-fixtures` gera módulos **sintéticos**: um `.ont` mínimo com todas as tags, um `.twm` de comentário e um de dicionário (após M1.1).
