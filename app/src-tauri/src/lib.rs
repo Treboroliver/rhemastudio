@@ -18,7 +18,7 @@ mod study;
 use reader::{ApiError, BookInfo, ChapterDto, READER_CACHE_CAPACITY, ReaderCache, ResolveDto};
 use study::{STUDY_CACHE_CAPACITY, StudyCache};
 
-const SETTINGS_SCHEMA_VERSION: u32 = 3;
+const SETTINGS_SCHEMA_VERSION: u32 = 4;
 
 fn legacy_schema_version() -> u32 {
     1
@@ -50,6 +50,7 @@ pub struct AppSettings {
     /// Comentários ativos. `None`: todos os comentários prontos.
     pub commentary_module_ids: Option<Vec<String>>,
     pub study_panel_open: bool,
+    pub highlight_words_of_jesus: bool,
 }
 
 impl Default for AppSettings {
@@ -68,6 +69,7 @@ impl Default for AppSettings {
             lexicon_module_ids: None,
             commentary_module_ids: None,
             study_panel_open: true,
+            highlight_words_of_jesus: true,
         }
     }
 }
@@ -504,7 +506,7 @@ async fn get_commentary_index(
 async fn get_commentary_entry(
     module_id: String,
     topic_id: i64,
-    offset: u32,
+    offset: u64,
     state: State<'_, AppState>,
 ) -> Result<study::CommentaryPageDto, ApiError> {
     let (catalog, _) = study_snapshot(&state)?;
@@ -514,7 +516,7 @@ async fn get_commentary_entry(
         .ok_or_else(|| ApiError::new("module_not_found", "Módulo não encontrado na biblioteca."))?;
     let cache = Arc::clone(&state.study);
     tauri::async_runtime::spawn_blocking(move || {
-        study::commentary_entry(&cache, &module, topic_id, offset as usize)
+        study::commentary_entry(&cache, &module, topic_id, offset)
     })
     .await
     .map_err(|error| ApiError::internal(error.to_string()))?
@@ -669,7 +671,7 @@ mod tests {
         )
         .expect("write legacy settings");
         let settings = load_settings(&path).expect("load legacy settings");
-        assert_eq!(settings.schema_version, 3);
+        assert_eq!(settings.schema_version, 4);
         assert!(settings.selected_bible_ids.is_empty());
         assert!(!settings.show_strong_numbers);
         assert_eq!(settings.bible_font_size, 20);
@@ -677,8 +679,9 @@ mod tests {
         assert_eq!(settings.lexicon_module_ids, None);
         assert_eq!(settings.commentary_module_ids, None);
         assert!(settings.study_panel_open);
+        assert!(settings.highlight_words_of_jesus);
         let persisted = fs::read_to_string(path).expect("read migrated settings");
-        assert!(persisted.contains("\"schema_version\": 3"));
+        assert!(persisted.contains("\"schema_version\": 4"));
         assert!(persisted.contains("\"selected_bible_ids\": []"));
         assert!(persisted.contains("\"study_panel_open\": true"));
     }
@@ -693,7 +696,7 @@ mod tests {
         )
         .expect("write version two settings");
         let settings = load_settings(&path).expect("migrate version two settings");
-        assert_eq!(settings.schema_version, 3);
+        assert_eq!(settings.schema_version, 4);
         assert_eq!(settings.theme, "light");
         assert_eq!(settings.bible_font_size, 24);
         assert!(settings.show_strong_numbers);
@@ -826,7 +829,7 @@ mod tests {
             ..AppSettings::default()
         };
         let validated = validate_settings(valid, &bibles).expect("valid parallel settings");
-        assert_eq!(validated.schema_version, 3);
+        assert_eq!(validated.schema_version, 4);
         assert_eq!(validated.selected_bible_ids, ["bible-2", "bible-1"]);
 
         let too_many = AppSettings {

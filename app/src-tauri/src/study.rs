@@ -25,6 +25,9 @@ pub const STUDY_CACHE_CAPACITY: usize = 6;
 /// Parágrafos por página de comentário.
 pub const COMMENTARY_PAGE_PARAGRAPHS: usize = 60;
 
+/// Caracteres por página de comentário; um parágrafo gigante também é dividido.
+pub const COMMENTARY_PAGE_CHARS: usize = 8_000;
+
 /// Cache LRU genérico; o primeiro item é o menos usado recentemente.
 pub struct LruCache<T> {
     capacity: usize,
@@ -319,8 +322,8 @@ pub struct CommentaryIndexDto {
 pub struct CommentaryPageDto {
     pub module_id: String,
     pub topic_id: i64,
-    pub offset: usize,
-    pub next_offset: usize,
+    pub offset: u64,
+    pub next_offset: u64,
     pub has_more: bool,
     pub nodes: Vec<UiNode>,
 }
@@ -479,7 +482,7 @@ pub fn commentary_entry(
     cache: &StudyCache,
     module: &ModuleInfo,
     topic_id: i64,
-    offset: usize,
+    offset: u64,
 ) -> Result<CommentaryPageDto, ApiError> {
     if module.kind != ModuleKind::Commentary {
         return Err(ApiError::new(
@@ -492,7 +495,12 @@ pub fn commentary_entry(
     }
     let source = cache.commentary(module)?;
     let page = locked(&source)
-        .entry_page(topic_id, offset, COMMENTARY_PAGE_PARAGRAPHS)
+        .entry_page(
+            topic_id,
+            offset,
+            COMMENTARY_PAGE_PARAGRAPHS,
+            COMMENTARY_PAGE_CHARS,
+        )
         .map_err(entry_error)?;
     Ok(CommentaryPageDto {
         module_id: module.id.clone(),
@@ -855,7 +863,7 @@ mod tests {
         let first = commentary_entry(&cache, &commentary, 40, 0).expect("página 1");
         assert_eq!(paragraphs(&first.nodes), COMMENTARY_PAGE_PARAGRAPHS);
         assert!(first.has_more);
-        assert_eq!((first.offset, first.next_offset), (0, 60));
+        assert_eq!((first.offset, first.next_offset), (0, 60 << 32));
         let second =
             commentary_entry(&cache, &commentary, 40, first.next_offset).expect("página 2");
         let third =

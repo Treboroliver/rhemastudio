@@ -11,7 +11,7 @@ pub use markup::{plain_text, tokenize_markup};
 pub use protection::ensure_twm_unprotected;
 pub use rtf::{
     convert_rtf, convert_rtf_page, convert_rtf_with_stats, decode_twm_content,
-    decode_twm_content_page, RtfConversion, RtfPage, RtfStats,
+    decode_twm_content_page, page_cursor, RtfConversion, RtfPage, RtfStats,
 };
 pub use twm::{
     normalize_strong_key, strong_key, CommentaryEntry, CommentaryHeader, CommentaryScope,

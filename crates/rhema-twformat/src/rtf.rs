@@ -92,43 +92,115 @@ pub struct RtfPage {
     pub nodes: Vec<Node>,
     /// Há conteúdo visível depois desta página.
     pub has_more: bool,
-    /// Parágrafo inicial da próxima página.
-    pub next_offset: usize,
+    /// Cursor da próxima página (ver [`page_cursor`]).
+    pub next_offset: u64,
 }
 
-/// Janela de parágrafos `[start, end)`; um parágrafo termina em cada `\par`.
+/// Codifica uma posição: parágrafo e caractere dentro dele.
+pub fn page_cursor(paragraph: usize, character: usize) -> u64 {
+    ((paragraph as u64) << 32) | (character as u64).min(u64::from(u32::MAX))
+}
+
+fn split_cursor(cursor: u64) -> (usize, usize) {
+    ((cursor >> 32) as usize, (cursor & u64::from(u32::MAX)) as usize)
+}
+
+/// Janela de leitura: até `max_paragraphs` parágrafos e `max_chars` caracteres a partir de
+/// `(start, skip)`. Um parágrafo termina em cada `\par`.
 struct Window {
     start: usize,
-    end: usize,
+    skip: usize,
+    limit: usize,
+    max_chars: usize,
+    emitted: usize,
     index: usize,
+    in_paragraph: usize,
     more: bool,
     stop: bool,
+    next: Option<u64>,
 }
 
-/// Converte somente `max_paragraphs` parágrafos a partir de `offset`.
+impl Window {
+    /// Já passou da posição inicial?
+    fn reached_start(&self) -> bool {
+        self.index > self.start || (self.index == self.start && self.in_paragraph >= self.skip)
+    }
+
+    fn stop_before(&mut self, character: usize) {
+        self.more = true;
+        self.stop = true;
+        self.next = Some(page_cursor(self.index, character));
+    }
+
+    /// Recorta um trecho de texto para a janela, contando os caracteres percorridos.
+    fn slice(&mut self, text: &str) -> Option<String> {
+        let count = text.chars().count();
+        let before = self.in_paragraph;
+        self.in_paragraph += count;
+        let skipped = if self.index < self.start {
+            count
+        } else if self.index == self.start {
+            self.skip.saturating_sub(before).min(count)
+        } else {
+            0
+        };
+        if skipped == count {
+            return None;
+        }
+        let rest = text.chars().skip(skipped).collect::<String>();
+        let remaining = if self.index >= self.limit {
+            0
+        } else {
+            self.max_chars.saturating_sub(self.emitted)
+        };
+        let rest_count = count - skipped;
+        if rest_count <= remaining {
+            self.emitted += rest_count;
+            return Some(rest);
+        }
+        let take = rest.chars().take(remaining).collect::<String>();
+        let tail = rest.chars().skip(remaining).collect::<String>();
+        if tail.trim().is_empty() {
+            self.emitted += rest_count;
+            return Some(rest);
+        }
+        self.emitted += remaining;
+        self.stop_before(before + skipped + remaining);
+        (!take.is_empty()).then_some(take)
+    }
+}
+
+/// Converte uma página: no máximo `max_paragraphs` parágrafos e `max_chars` caracteres a
+/// partir do cursor `offset` (zero é o início).
 ///
 /// O texto anterior à janela é percorrido, mas não vira nós; a leitura termina assim que
 /// aparece conteúdo visível depois da janela. Assim, entradas de centenas de KB nunca são
-/// convertidas por inteiro.
+/// convertidas por inteiro e um parágrafo gigante também é dividido.
 pub fn convert_rtf_page(
     input: &[u8],
-    offset: usize,
+    offset: u64,
     max_paragraphs: usize,
+    max_chars: usize,
 ) -> Result<RtfPage, ModuleError> {
-    let end = offset.saturating_add(max_paragraphs.max(1));
+    let (start, skip) = split_cursor(offset);
     let window = Window {
-        start: offset,
-        end,
+        start,
+        skip,
+        limit: start.saturating_add(max_paragraphs.max(1)),
+        max_chars: max_chars.max(1),
+        emitted: 0,
         index: 0,
+        in_paragraph: 0,
         more: false,
         stop: false,
+        next: None,
     };
     let (conversion, window) = convert_windowed(input, Some(window))?;
-    let has_more = window.is_some_and(|window| window.more);
+    let (has_more, next) = window.map_or((false, None), |window| (window.more, window.next));
     Ok(RtfPage {
         nodes: conversion.nodes,
         has_more,
-        next_offset: end,
+        next_offset: next.unwrap_or_else(|| page_cursor(start.saturating_add(max_paragraphs.max(1)), 0)),
     })
 }
 
@@ -508,14 +580,6 @@ impl Parser<'_> {
         if text.is_empty() || self.current().destination == Destination::Skip {
             return;
         }
-        if self.current().destination == Destination::Normal
-            && self
-                .window
-                .as_ref()
-                .is_some_and(|window| window.index < window.start)
-        {
-            return;
-        }
         if self.pending_high_surrogate.is_some() {
             self.flush_pending_surrogate();
         }
@@ -525,6 +589,18 @@ impl Parser<'_> {
             }
             return;
         }
+        let sliced;
+        let text = if let Some(window) = self.window.as_mut() {
+            match window.slice(text) {
+                Some(part) => {
+                    sliced = part;
+                    sliced.as_str()
+                }
+                None => return,
+            }
+        } else {
+            text
+        };
         let state = self.current().state.clone();
         let mut node = Node::Text(text.to_string());
         if state.superscript {
@@ -548,7 +624,8 @@ impl Parser<'_> {
         if state.bold {
             node = Node::Bold(vec![node]);
         }
-        self.append_node(node);
+        // O texto já foi recortado pela janela; só quebras passam por `window_accepts`.
+        self.current().nodes.push(node);
     }
 
     fn append_node(&mut self, node: Node) {
@@ -567,21 +644,15 @@ impl Parser<'_> {
         }
     }
 
-    /// Decide se o nó pertence à página pedida e acompanha o fim da janela.
+    /// Decide se uma quebra pertence à página pedida e acompanha o fim da janela.
     fn window_accepts(&mut self, node: &Node) -> bool {
         let Some(window) = self.window.as_mut() else {
             return true;
         };
-        if window.index >= window.end {
-            if !node.to_plain_text().trim().is_empty() {
-                window.more = true;
-                window.stop = true;
-            }
-            return false;
-        }
-        let inside = window.index >= window.start;
+        let inside = window.reached_start() && window.index < window.limit;
         if matches!(node, Node::Paragraph) {
             window.index += 1;
+            window.in_paragraph = 0;
         }
         inside
     }
@@ -659,11 +730,12 @@ pub fn decode_twm_content(content_type: &str, input: &[u8]) -> Result<Vec<Node>,
 pub fn decode_twm_content_page(
     content_type: &str,
     input: &[u8],
-    offset: usize,
+    offset: u64,
     max_paragraphs: usize,
+    max_chars: usize,
 ) -> Result<RtfPage, ModuleError> {
     match content_type {
-        "rtf" => convert_rtf_page(input, offset, max_paragraphs),
+        "rtf" => convert_rtf_page(input, offset, max_paragraphs, max_chars),
         other => Err(ModuleError::UnsupportedContent(other.to_string())),
     }
 }
@@ -895,8 +967,8 @@ mod tests {
             stitched.clear();
             let mut offset = 0;
             loop {
-                let page = convert_rtf_page(rtf, offset, size).expect("página");
-                assert_eq!(page.next_offset, offset + size);
+                let page = convert_rtf_page(rtf, offset, size, 8_000).expect("página");
+                assert_eq!(page.next_offset, offset + ((size as u64) << 32));
                 stitched.extend(page.nodes);
                 if !page.has_more {
                     break;
@@ -908,17 +980,43 @@ mod tests {
     }
 
     #[test]
+    fn character_limit_splits_a_giant_paragraph_without_loss() {
+        let rtf = br"{\rtf1 Alpha beta gamma delta {\b epsilon zeta} eta theta iota kappa\par Next one}";
+        let full = plain_text(&convert_rtf(rtf).expect("RTF sintético"));
+        for limit in [1, 2, 3, 5, 7, 11, 20] {
+            let mut text = String::new();
+            let (mut offset, mut pages) = (0, 0);
+            loop {
+                let page = convert_rtf_page(rtf, offset, 60, limit).expect("página");
+                assert!(plain_text(&page.nodes).chars().count() <= limit + 1, "limite {limit}");
+                text.push_str(&plain_text(&page.nodes));
+                pages += 1;
+                assert!(pages < 200, "sem progresso");
+                if !page.has_more {
+                    break;
+                }
+                assert!(page.next_offset > offset);
+                offset = page.next_offset;
+            }
+            assert_eq!(text, full, "limite de {limit} caracteres");
+        }
+        let first = convert_rtf_page(rtf, 0, 60, 10).expect("primeira");
+        assert!(first.has_more && first.next_offset == 10);
+    }
+
+    #[test]
     fn page_reports_more_only_when_visible_content_follows() {
         let rtf = br"{\rtf1 One\par Two\par \par }";
-        let first = convert_rtf_page(rtf, 0, 1).expect("primeira página");
+        let first = convert_rtf_page(rtf, 0, 1, 8_000).expect("primeira página");
         assert!(first.has_more);
         assert_eq!(plain_text(&first.nodes), "One");
-        let rest = convert_rtf_page(rtf, 1, 10).expect("restante");
+        let rest = convert_rtf_page(rtf, page_cursor(1, 0), 10, 8_000).expect("restante");
         assert!(!rest.has_more);
         assert_eq!(plain_text(&rest.nodes), "Two");
-        let beyond = convert_rtf_page(rtf, 50, 10).expect("depois do fim");
+        let beyond = convert_rtf_page(rtf, page_cursor(50, 0), 10, 8_000).expect("depois do fim");
         assert!(beyond.nodes.is_empty() && !beyond.has_more);
-        let unterminated = convert_rtf_page(br"{\rtf1 Only text", 0, 60).expect("sem par");
+        let unterminated =
+            convert_rtf_page(br"{\rtf1 Only text", 0, 60, 8_000).expect("sem par");
         assert_eq!(plain_text(&unterminated.nodes), "Only text");
         assert!(!unterminated.has_more);
     }
@@ -926,7 +1024,7 @@ mod tests {
     #[test]
     fn page_keeps_formatting_state_from_skipped_paragraphs_and_links_whole() {
         let rtf = br#"{\rtf1 {\b Bold start\par still bold\par }plain {\field{\*\fldinst HYPERLINK "tw://bible.*?id=43.3.16|_AUTODETECT_|"}{\fldrslt link text}}\par next}"#;
-        let page = convert_rtf_page(rtf, 2, 1).expect("página com link");
+        let page = convert_rtf_page(rtf, page_cursor(2, 0), 1, 8_000).expect("página com link");
         assert_eq!(plain_text(&page.nodes), "plain link text");
         assert!(page.nodes.iter().any(|node| matches!(
             node,
@@ -936,7 +1034,7 @@ mod tests {
             }
         )));
         assert!(page.has_more);
-        assert!(convert_rtf_page(b"plain", 0, 10).is_err());
+        assert!(convert_rtf_page(b"plain", 0, 10, 8_000).is_err());
     }
 
     #[test]
@@ -946,7 +1044,7 @@ mod tests {
             rtf.push_str(&format!("Paragraph {index}\\par "));
         }
         rtf.push('}');
-        let page = convert_rtf_page(rtf.as_bytes(), 0, 60).expect("primeira página");
+        let page = convert_rtf_page(rtf.as_bytes(), 0, 60, 8_000).expect("primeira página");
         assert!(page.has_more);
         let paragraphs = page
             .nodes
@@ -959,9 +1057,9 @@ mod tests {
 
     #[test]
     fn dispatches_page_conversion_by_declared_type() {
-        assert!(decode_twm_content_page("rtf", br"{\rtf1 a\par b}", 0, 1).is_ok());
+        assert!(decode_twm_content_page("rtf", br"{\rtf1 a\par b}", 0, 1, 100).is_ok());
         assert!(matches!(
-            decode_twm_content_page("rvf", b"x", 0, 1),
+            decode_twm_content_page("rvf", b"x", 0, 1, 100),
             Err(ModuleError::UnsupportedContent(kind)) if kind == "rvf"
         ));
     }

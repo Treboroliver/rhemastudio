@@ -51,7 +51,10 @@ impl TwmModule {
 
         let mut config = HashMap::new();
         let mut statement = connection
-            .prepare("SELECT name, value FROM config")
+            .prepare(
+                "SELECT name, value FROM config \
+                 WHERE lower(trim(name)) IN ('type', 'content.type', 'title', 'lang')",
+            )
             .map_err(|error| corrupted(format!("leitura de configuração: {error}")))?;
         let mut rows = statement
             .query([])
@@ -123,15 +126,16 @@ impl TwmModule {
         &self,
         topic_id: i64,
         row_type: Option<&str>,
-        offset: usize,
+        offset: u64,
         max_paragraphs: usize,
+        max_chars: usize,
     ) -> Result<RtfPage, ModuleError> {
         let content_type = self.content_type(row_type);
         if content_type != "rtf" {
             return Err(ModuleError::UnsupportedContent(content_type));
         }
         let bytes = self.read_content_bytes(topic_id)?;
-        crate::decode_twm_content_page(&content_type, &bytes, offset, max_paragraphs)
+        crate::decode_twm_content_page(&content_type, &bytes, offset, max_paragraphs, max_chars)
     }
 
     /// Tamanho bruto do conteúdo, sem convertê-lo.
@@ -152,7 +156,7 @@ impl TwmModule {
         let data: Value = self
             .connection
             .query_row(
-                "SELECT data FROM content WHERE topic_id = ?1",
+                "SELECT CAST(data AS BLOB) FROM content WHERE topic_id = ?1",
                 [topic_id],
                 |row| row.get(0),
             )
@@ -371,12 +375,13 @@ impl CommentarySource {
             .collect()
     }
 
-    /// Converte uma página de parágrafos de uma entrada conhecida deste módulo.
+    /// Converte uma página (parágrafos e caracteres limitados) de uma entrada deste módulo.
     pub fn entry_page(
         &self,
         topic_id: i64,
-        offset: usize,
+        offset: u64,
         max_paragraphs: usize,
+        max_chars: usize,
     ) -> Result<RtfPage, ModuleError> {
         let entry = self
             .by_topic
@@ -388,6 +393,7 @@ impl CommentarySource {
             entry.content_type.as_deref(),
             offset,
             max_paragraphs,
+            max_chars,
         )
     }
 }
@@ -859,7 +865,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(unsupported, [(50, "rvf")]);
 
-        let first = source.entry_page(40, 0, 60).expect("primeira página");
+        let first = source.entry_page(40, 0, 60, 8_000).expect("primeira página");
         let paragraphs = |page: &RtfPage| {
             page.nodes
                 .iter()
@@ -869,21 +875,21 @@ mod tests {
         assert_eq!(paragraphs(&first), 60);
         assert!(first.has_more);
         let second = source
-            .entry_page(40, first.next_offset, 60)
+            .entry_page(40, first.next_offset, 60, 8_000)
             .expect("segunda");
         let third = source
-            .entry_page(40, second.next_offset, 60)
+            .entry_page(40, second.next_offset, 60, 8_000)
             .expect("terceira");
         assert_eq!(paragraphs(&second), 60);
         assert_eq!(paragraphs(&third), 30);
         assert!(second.has_more && !third.has_more);
 
         assert!(matches!(
-            source.entry_page(50, 0, 60),
+            source.entry_page(50, 0, 60, 8_000),
             Err(ModuleError::UnsupportedContent(kind)) if kind == "rvf"
         ));
         assert!(matches!(
-            source.entry_page(999, 0, 60),
+            source.entry_page(999, 0, 60, 8_000),
             Err(ModuleError::NotFound(_))
         ));
         assert!(matches!(
@@ -915,6 +921,76 @@ mod tests {
             TwmModule::open(&truncated),
             Err(ModuleError::Corrupted(_))
         ));
+    }
+
+    /// Diagnóstico sem texto: contagem de "vírgula + letra" e contextos mascarados (x/9).
+    #[test]
+    fn real_rtf_comma_spacing_diagnostic() {
+        let Ok(root) = std::env::var("RHEMA_TEST_MODULES") else {
+            return;
+        };
+        let mask = |bytes: &[u8]| {
+            bytes
+                .iter()
+                .map(|b| match b {
+                    b'a'..=b'z' | b'A'..=b'Z' => 'x',
+                    b'0'..=b'9' => '9',
+                    32..=126 => *b as char,
+                    _ => '?',
+                })
+                .collect::<String>()
+        };
+        for filename in ["Holman-AT.cmt.twm", "NICNT.cmt.twm", "Strong_AMG2.dct.twm"] {
+            let path = std::path::Path::new(&root).join(filename);
+            let module = TwmModule::open(&path).expect("abrir módulo real");
+            let mut statement = module
+                .connection
+                .prepare("SELECT topic_id FROM content ORDER BY topic_id")
+                .expect("ids");
+            let ids = statement
+                .query_map([], |row| row.get::<_, i64>(0))
+                .expect("consulta")
+                .flatten()
+                .collect::<Vec<_>>();
+            drop(statement);
+            let step = (ids.len() / 2000).max(1);
+            let (mut entries, mut hits, mut shown) = (0usize, 0usize, 0usize);
+            let mut patterns = std::collections::BTreeSet::new();
+            for id in ids.iter().step_by(step).take(2000) {
+                let Ok(raw) = module.read_content_bytes(*id) else {
+                    continue;
+                };
+                let Ok(nodes) = crate::decode_twm_content("rtf", &raw) else {
+                    continue;
+                };
+                entries += 1;
+                let plain = nodes.iter().map(Node::to_plain_text).collect::<String>();
+                let chars = plain.chars().collect::<Vec<_>>();
+                let found = chars
+                    .windows(2)
+                    .filter(|w| w[0] == ',' && w[1].is_alphabetic())
+                    .count();
+                hits += found;
+                if found > 0 && shown < 6 {
+                    for (i, byte) in raw.iter().enumerate() {
+                        if *byte == b','
+                            && raw.get(i + 1).is_some_and(|n| *n != b' ')
+                            && raw[i + 1..(i + 9).min(raw.len())]
+                                .iter()
+                                .any(|n| matches!(n, b'\\' | b'{' | b'}'))
+                            && patterns.insert(mask(&raw[i.saturating_sub(10)..(i + 40).min(raw.len())]))
+                        {
+                            shown += 1;
+                            break;
+                        }
+                    }
+                }
+            }
+            eprintln!("{filename}: entries={entries} comma_letter={hits}");
+            for pattern in patterns.iter().take(6) {
+                eprintln!("  ctx: {}", pattern.chars().take(60).collect::<String>());
+            }
+        }
     }
 
     #[test]
