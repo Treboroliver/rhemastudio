@@ -131,7 +131,23 @@ describe('theme contrast tokens', () => {
       ['--warning-subtle', '--card'],
       ['--error', '--error-bg'],
       ['--primary-text', '--accent-deep'],
-      ['--primary-text', '--accent-hover']
+      ['--primary-text', '--accent-hover'],
+      ['--text', '--panel'],
+      ['--text', '--card'],
+      ['--text-strong', '--panel'],
+      ['--muted', '--bg'],
+      ['--accent-text', '--panel'],
+      ['--accent-text', '--card'],
+      ['--link', '--bg'],
+      ['--link', '--panel'],
+      ['--link', '--card'],
+      ['--link', '--hover-bg'],
+      ['--link', '--selected-bg'],
+      ['--warning', '--card'],
+      ['--error', '--panel'],
+      ['--error', '--card'],
+      ['--text', '--strong-hover-bg'],
+      ['--text', '--hover-bg']
     ]
     expect(css).toMatch(/\.strong-word:hover,\s*\.strong-word:focus-visible/)
     expect(css).toMatch(/\.strong-word\.show-strong\s*\{\s*text-decoration:\s*underline dashed/)

@@ -110,10 +110,19 @@ O resultado das inspeções é colado em `docs/02-apendice-schemas.md` (um bloco
 - O tipo efetivo é o `content_type` da entrada; somente NULL usa `config.content.type`. RVF ou outro tipo não suportado resulta em `UnsupportedContent` no campo `content` daquela entrada, sem descartar as demais. Nenhum payload RVF é decodificado nem representado como árvore vazia.
 - CLI: `rhema-cli dump-cmt <arquivo> --book N --chapter N --verse N [--plain|--parsed]` e `rhema-cli dump-dct <arquivo> --key G25 [--plain|--parsed]`. A saída é limitada a 40 linhas e 1.500 caracteres, com aviso quando truncada.
 
+### API M4a para o painel de estudo
+
+- `CommentarySource::headers_for(VerseRef)` devolve `CommentaryHeader` (tópico, `bi/ci/fvi/tvi`, escopo, `content_type` efetivo, `supported`, tamanho bruto em bytes) na mesma ordem de `entries_for`, **sem ler nem converter o conteúdo**. O tamanho vem de `length(CAST(data AS BLOB))`.
+- `CommentarySource::entry_page(topic_id, offset, max_paragraphs)` converte somente uma janela de parágrafos (`\par`) e devolve `RtfPage { nodes, has_more, next_offset }`. `convert_rtf_page` percorre o RTF mantendo o estado de formatação, descarta o texto anterior à janela sem criar nós e para ao encontrar conteúdo visível depois dela; `has_more` é verdadeiro somente nesse caso. Tópico desconhecido retorna `NotFound`; RVF retorna `UnsupportedContent` sem ler os dados. Uma entrada sem nenhum `\par` continua sendo uma única página (nenhuma entrada real encontrada se comportou assim).
+- Escopos para a interface (`app/src-tauri/src/study.rs`): `verse` (`fvi == tvi`), `range` (`fvi < tvi`, `tvi = 0` vai até o fim do capítulo), `chapter` (faixa que cobre o capítulo inteiro), `chapterIntro` (`fvi = 0`) e `bookIntro` (`ci = 0`).
+- `normalize_strong_key("g0025")`, `"G25a"` → `(Greek, 25)`; aceita zeros à esquerda e sufixo de letras; rejeita número zero, sem dígitos ou com mais de 5 dígitos.
+- Links RTF para a interface: `Bible` → `verseLink` (início da faixa; a leitura navega), `Dictionary` com chave G/H → `entryLink` (abre o verbete), qualquer outro destino (`Other`, ou `Dictionary` que não seja chave de Strong) → `link` simples com `hint` contendo só o subtipo (`person` em `tw://person…`), nunca o endereço. O único formato de link de verbete confirmado em dado sintético é `_STRONG_G25|…`; nenhum link de verbete foi observado nos módulos reais (ver seção 2.3 do apêndice), de modo que essa classificação continua sem validação real.
+- Verbetes de Strong: G25, G26 e H430 de Strong_AMG2 são RTF e abrem; G3056 é uma das entradas RVF do módulo e retorna `unsupported_format`.
+
 ## 4. Strong e léxico
 - Bíblia com Strong: tags `<WG…>`/`<WH…>`.
-- Clique no número → consulta ao dicionário configurado como "léxico padrão" para o idioma (`G25` → entrada).
-- Se não houver dicionário instalado, o painel mostra o número e convida a instalar um módulo.
+- Clique (ou Enter, com foco) no número → consulta aos dicionários prontos na ordem de preferência (`lexicon_module_ids`; sem lista salva, dicionários em português primeiro). O primeiro que tiver a chave normalizada (`G25`) responde; se um tiver a entrada em RVF e nenhum outro a tiver legível, o aviso de formato não suportado prevalece sobre "não encontrado".
+- Se não houver dicionário instalado, o painel mostra "Instale um dicionário para ver o léxico" com atalho para gerenciar pastas. Módulos protegidos nunca são lidos.
 - Busca por Strong: índice invertido `strong_id → [VerseRef]` por módulo.
 
 ## 5. Modelo interno (referência)

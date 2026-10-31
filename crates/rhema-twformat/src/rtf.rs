@@ -83,6 +83,59 @@ pub fn convert_rtf(input: &[u8]) -> Result<Vec<Node>, ModuleError> {
 
 /// Converte RTF e devolve contagens de controles desconhecidos e destinos especiais.
 pub fn convert_rtf_with_stats(input: &[u8]) -> Result<RtfConversion, ModuleError> {
+    convert_windowed(input, None).map(|(conversion, _)| conversion)
+}
+
+/// Uma página de conteúdo RTF convertido sob demanda.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RtfPage {
+    pub nodes: Vec<Node>,
+    /// Há conteúdo visível depois desta página.
+    pub has_more: bool,
+    /// Parágrafo inicial da próxima página.
+    pub next_offset: usize,
+}
+
+/// Janela de parágrafos `[start, end)`; um parágrafo termina em cada `\par`.
+struct Window {
+    start: usize,
+    end: usize,
+    index: usize,
+    more: bool,
+    stop: bool,
+}
+
+/// Converte somente `max_paragraphs` parágrafos a partir de `offset`.
+///
+/// O texto anterior à janela é percorrido, mas não vira nós; a leitura termina assim que
+/// aparece conteúdo visível depois da janela. Assim, entradas de centenas de KB nunca são
+/// convertidas por inteiro.
+pub fn convert_rtf_page(
+    input: &[u8],
+    offset: usize,
+    max_paragraphs: usize,
+) -> Result<RtfPage, ModuleError> {
+    let end = offset.saturating_add(max_paragraphs.max(1));
+    let window = Window {
+        start: offset,
+        end,
+        index: 0,
+        more: false,
+        stop: false,
+    };
+    let (conversion, window) = convert_windowed(input, Some(window))?;
+    let has_more = window.is_some_and(|window| window.more);
+    Ok(RtfPage {
+        nodes: conversion.nodes,
+        has_more,
+        next_offset: end,
+    })
+}
+
+fn convert_windowed(
+    input: &[u8],
+    window: Option<Window>,
+) -> Result<(RtfConversion, Option<Window>), ModuleError> {
     let header_offset = input
         .iter()
         .position(|byte| !byte.is_ascii_whitespace())
@@ -101,6 +154,7 @@ pub fn convert_rtf_with_stats(input: &[u8]) -> Result<RtfConversion, ModuleError
         fallback_remaining: 0,
         pending_high_surrogate: None,
         ansi_run: Vec::new(),
+        window,
     };
     parser.parse();
     let mut root = parser.frames.pop().unwrap_or_else(Frame::root);
@@ -110,10 +164,13 @@ pub fn convert_rtf_with_stats(input: &[u8]) -> Result<RtfConversion, ModuleError
         }
         root = frame;
     }
-    Ok(RtfConversion {
-        nodes: root.nodes,
-        stats: parser.stats,
-    })
+    Ok((
+        RtfConversion {
+            nodes: root.nodes,
+            stats: parser.stats,
+        },
+        parser.window,
+    ))
 }
 
 struct Parser<'a> {
@@ -124,11 +181,12 @@ struct Parser<'a> {
     fallback_remaining: usize,
     pending_high_surrogate: Option<u16>,
     ansi_run: Vec<u8>,
+    window: Option<Window>,
 }
 
 impl Parser<'_> {
     fn parse(&mut self) {
-        while self.cursor < self.input.len() {
+        while self.cursor < self.input.len() && !self.window.as_ref().is_some_and(|w| w.stop) {
             let byte = self.input[self.cursor];
             if self.fallback_remaining > 0 && byte != b'{' && byte != b'}' {
                 self.skip_fallback();
@@ -450,6 +508,14 @@ impl Parser<'_> {
         if text.is_empty() || self.current().destination == Destination::Skip {
             return;
         }
+        if self.current().destination == Destination::Normal
+            && self
+                .window
+                .as_ref()
+                .is_some_and(|window| window.index < window.start)
+        {
+            return;
+        }
         if self.pending_high_surrogate.is_some() {
             self.flush_pending_surrogate();
         }
@@ -487,7 +553,11 @@ impl Parser<'_> {
 
     fn append_node(&mut self, node: Node) {
         match self.current().destination {
-            Destination::Normal => self.current().nodes.push(node),
+            Destination::Normal => {
+                if self.window_accepts(&node) {
+                    self.current().nodes.push(node);
+                }
+            }
             Destination::FieldInstruction => {
                 if let Some(instruction) = &mut self.current().field_instruction {
                     instruction.push_str(&node.to_plain_text());
@@ -495,6 +565,25 @@ impl Parser<'_> {
             }
             Destination::Skip => {}
         }
+    }
+
+    /// Decide se o nó pertence à página pedida e acompanha o fim da janela.
+    fn window_accepts(&mut self, node: &Node) -> bool {
+        let Some(window) = self.window.as_mut() else {
+            return true;
+        };
+        if window.index >= window.end {
+            if !node.to_plain_text().trim().is_empty() {
+                window.more = true;
+                window.stop = true;
+            }
+            return false;
+        }
+        let inside = window.index >= window.start;
+        if matches!(node, Node::Paragraph) {
+            window.index += 1;
+        }
+        inside
     }
 
     fn count_unknown_control(&mut self, name: String) {
@@ -562,6 +651,19 @@ fn encoding_for_codepage(codepage: u16) -> Option<&'static Encoding> {
 pub fn decode_twm_content(content_type: &str, input: &[u8]) -> Result<Vec<Node>, ModuleError> {
     match content_type {
         "rtf" => convert_rtf(input),
+        other => Err(ModuleError::UnsupportedContent(other.to_string())),
+    }
+}
+
+/// Como `decode_twm_content`, mas converte apenas uma página de parágrafos.
+pub fn decode_twm_content_page(
+    content_type: &str,
+    input: &[u8],
+    offset: usize,
+    max_paragraphs: usize,
+) -> Result<RtfPage, ModuleError> {
+    match content_type {
+        "rtf" => convert_rtf_page(input, offset, max_paragraphs),
         other => Err(ModuleError::UnsupportedContent(other.to_string())),
     }
 }
@@ -782,6 +884,86 @@ mod tests {
             )
             .expect("RTF sintético válido")
         );
+    }
+
+    #[test]
+    fn pages_cover_the_entry_without_overlap_or_loss() {
+        let rtf = br"{\rtf1\ansi {\fonttbl{\f0 Arial;}}\b First\b0  one\par Second {\i two}\par Third \ul three\ulnone\par Fourth\par Fifth tail}";
+        let full = convert_rtf(rtf).expect("RTF sintético");
+        let mut stitched = Vec::new();
+        for size in 1..=6 {
+            stitched.clear();
+            let mut offset = 0;
+            loop {
+                let page = convert_rtf_page(rtf, offset, size).expect("página");
+                assert_eq!(page.next_offset, offset + size);
+                stitched.extend(page.nodes);
+                if !page.has_more {
+                    break;
+                }
+                offset = page.next_offset;
+            }
+            assert_eq!(stitched, full, "páginas de {size} parágrafos");
+        }
+    }
+
+    #[test]
+    fn page_reports_more_only_when_visible_content_follows() {
+        let rtf = br"{\rtf1 One\par Two\par \par }";
+        let first = convert_rtf_page(rtf, 0, 1).expect("primeira página");
+        assert!(first.has_more);
+        assert_eq!(plain_text(&first.nodes), "One");
+        let rest = convert_rtf_page(rtf, 1, 10).expect("restante");
+        assert!(!rest.has_more);
+        assert_eq!(plain_text(&rest.nodes), "Two");
+        let beyond = convert_rtf_page(rtf, 50, 10).expect("depois do fim");
+        assert!(beyond.nodes.is_empty() && !beyond.has_more);
+        let unterminated = convert_rtf_page(br"{\rtf1 Only text", 0, 60).expect("sem par");
+        assert_eq!(plain_text(&unterminated.nodes), "Only text");
+        assert!(!unterminated.has_more);
+    }
+
+    #[test]
+    fn page_keeps_formatting_state_from_skipped_paragraphs_and_links_whole() {
+        let rtf = br#"{\rtf1 {\b Bold start\par still bold\par }plain {\field{\*\fldinst HYPERLINK "tw://bible.*?id=43.3.16|_AUTODETECT_|"}{\fldrslt link text}}\par next}"#;
+        let page = convert_rtf_page(rtf, 2, 1).expect("página com link");
+        assert_eq!(plain_text(&page.nodes), "plain link text");
+        assert!(page.nodes.iter().any(|node| matches!(
+            node,
+            Node::Link {
+                target: LinkTarget::Bible(_),
+                ..
+            }
+        )));
+        assert!(page.has_more);
+        assert!(convert_rtf_page(b"plain", 0, 10).is_err());
+    }
+
+    #[test]
+    fn page_stops_reading_after_the_window() {
+        let mut rtf = String::from(r"{\rtf1 ");
+        for index in 0..5_000 {
+            rtf.push_str(&format!("Paragraph {index}\\par "));
+        }
+        rtf.push('}');
+        let page = convert_rtf_page(rtf.as_bytes(), 0, 60).expect("primeira página");
+        assert!(page.has_more);
+        let paragraphs = page
+            .nodes
+            .iter()
+            .filter(|node| matches!(node, Node::Paragraph))
+            .count();
+        assert_eq!(paragraphs, 60);
+        assert!(!plain_text(&page.nodes).contains("Paragraph 60"));
+    }
+
+    #[test]
+    fn dispatches_page_conversion_by_declared_type() {
+        assert!(decode_twm_content_page("rtf", br"{\rtf1 a\par b}", 0, 1).is_ok());
+        assert!(matches!(
+            decode_twm_content_page("rvf", b"x", 0, 1),
+            Err(ModuleError::UnsupportedContent(kind)) if kind == "rvf"
+        ));
     }
 
     #[test]

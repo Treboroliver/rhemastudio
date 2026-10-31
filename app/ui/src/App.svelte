@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte'
+  import { onMount, tick, untrack } from 'svelte'
   import { invoke } from '@tauri-apps/api/core'
   import { listen, type UnlistenFn } from '@tauri-apps/api/event'
   import ptBr from './i18n/pt-BR.json'
@@ -7,8 +7,16 @@
   import FirstRunWizard from './lib/FirstRunWizard.svelte'
   import LibraryTree from './lib/LibraryTree.svelte'
   import ParallelBiblePane from './lib/ParallelBiblePane.svelte'
+  import StudyPanel from './lib/StudyPanel.svelte'
   import CommandBar from './lib/CommandBar.svelte'
-  import { isReady, type AppSettings, type ModuleInfo } from './lib/modules'
+  import {
+    activeCommentaryIds as resolveActiveCommentaryIds,
+    isReady,
+    readyCommentaries,
+    type AppSettings,
+    type ModuleInfo
+  } from './lib/modules'
+  import type { StrongRequest, StudyTab } from './lib/study'
   import {
     addBibleColumn,
     applyTheme,
@@ -32,7 +40,7 @@
 
   const dictionaries = { 'pt-BR': ptBr, en }
   const defaults: AppSettings = {
-    schema_version: 2,
+    schema_version: 3,
     module_folders: [],
     default_bible_id: null,
     selected_bible_ids: [],
@@ -40,7 +48,10 @@
     theme: 'dark',
     show_strong_numbers: false,
     bible_font_size: 20,
-    first_use_completed: false
+    first_use_completed: false,
+    lexicon_module_ids: null,
+    commentary_module_ids: null,
+    study_panel_open: true
   }
 
   let settings = $state<AppSettings>(defaults)
@@ -63,6 +74,12 @@
   let chapterError = $state<ApiError | null>(null)
   let chapterLoading = $state(false)
   let showCommand = $state(false)
+  let studyTab = $state<StudyTab>('lexicon')
+  let strongRequest = $state<StrongRequest | null>(null)
+  let studyPanel = $state<ReturnType<typeof StudyPanel> | null>(null)
+  let strongAnchor: HTMLElement | null = null
+  let panelReturnFocus: HTMLElement | null = null
+  let strongSequence = 0
   const history = new History()
   let chapterSequence = 0
   let saveTimer: ReturnType<typeof setTimeout> | undefined
@@ -85,6 +102,16 @@
     !!passage && previousChapter(passage, books) !== null
   )
   const canNext = $derived(!!passage && nextChapter(passage, books) !== null)
+  const studyOpen = $derived(settings.study_panel_open ?? true)
+  const commentaryModules = $derived(readyCommentaries(modules))
+  const activeCommentaryIds = $derived(
+    resolveActiveCommentaryIds(settings.commentary_module_ids, modules)
+  )
+  const verseSelection = $derived(
+    passage && passage.verse
+      ? { book: passage.book, chapter: passage.chapter, verse: passage.verse }
+      : null
+  )
 
   const t = (key: string, values: Record<string, string | number> = {}) => {
     const table = dictionaries[settings.interface_language] as Record<string, string>
@@ -396,6 +423,58 @@
   const resolveText = (text: string) =>
     invoke<ResolveDto>('resolve_reference', { text, lang: settings.interface_language })
 
+  function setStudyOpen(open: boolean) {
+    if (open === studyOpen) return
+    if (open) {
+      const focused = document.activeElement
+      panelReturnFocus = focused instanceof HTMLElement ? focused : null
+    } else if (studyPanel?.contains(document.activeElement)) {
+      returnFocus()
+    }
+    settings = { ...settings, study_panel_open: open }
+    void saveSettings({ study_panel_open: open })
+    if (open) void tick().then(() => studyPanel?.focusContent())
+  }
+
+  /** Devolve o foco à palavra que abriu o painel ou, sem ela, ao elemento anterior. */
+  function returnFocus() {
+    const target = strongAnchor?.isConnected ? strongAnchor : panelReturnFocus
+    if (target?.isConnected) target.focus()
+  }
+
+  function openStrong(ids: string[], element: HTMLElement) {
+    strongAnchor?.removeAttribute('data-strong-active')
+    strongAnchor = element
+    element.setAttribute('data-strong-active', 'true')
+    strongRequest = { ids, seq: ++strongSequence }
+    studyTab = 'lexicon'
+    if (!studyOpen) {
+      panelReturnFocus = element
+      settings = { ...settings, study_panel_open: true }
+      void saveSettings({ study_panel_open: true })
+    }
+    void tick().then(() => setTimeout(() => studyPanel?.focusContent(), 0))
+  }
+
+  function openEntry(id: string) {
+    strongRequest = { ids: [id], seq: ++strongSequence }
+    studyTab = 'lexicon'
+  }
+
+  function openVerse(target: { book: number; chapter: number; verse: number }) {
+    const book = books.find((candidate) => candidate.number === target.book)
+    if (!book || target.chapter < 1 || target.chapter > book.chapters || target.verse < 1) return
+    navigate({ book: target.book, chapter: target.chapter, verse: target.verse })
+  }
+
+  async function toggleCommentary(id: string, enabled: boolean) {
+    const wanted = new Set(activeCommentaryIds)
+    if (enabled) wanted.add(id)
+    else wanted.delete(id)
+    const next = commentaryModules.map((module) => module.id).filter((moduleId) => wanted.has(moduleId))
+    await saveSettings({ commentary_module_ids: next })
+  }
+
   function onWindowKeydown(event: KeyboardEvent) {
     if (showSetup) return
     const key = event.key
@@ -404,6 +483,9 @@
       showCommand = !showCommand
     } else if (showCommand) {
       return
+    } else if (event.ctrlKey && !event.shiftKey && !event.altKey && key.toLowerCase() === 'b') {
+      event.preventDefault()
+      setStudyOpen(!studyOpen)
     } else if (event.ctrlKey && event.shiftKey && key.toLowerCase() === 's') {
       event.preventDefault()
       void saveSettings({ show_strong_numbers: !settings.show_strong_numbers })
@@ -447,8 +529,12 @@
     }
   })
 
+  // Só recarrega o capítulo quando livro ou capítulo mudam; selecionar um versículo não deve
+  // recriar o texto (perderia a palavra clicada e o foco).
+  const chapterKey = $derived(passage ? `${passage.book}:${passage.chapter}` : '')
+
   $effect(() => {
-    void [selectedBibleIds.join('|'), passage?.book, passage?.chapter, showSetup, books.length, modules]
+    void [selectedBibleIds.join('|'), chapterKey, showSetup, books.length, modules]
     if (!showSetup) untrack(() => void loadChapter())
   })
 
@@ -507,6 +593,16 @@
           <option value="light">{t('themeLight')}</option>
           <option value="auto">{t('themeAuto')}</option>
         </select>
+        <button
+          class="command-open study-toggle"
+          type="button"
+          aria-pressed={studyOpen}
+          aria-label={t('toggleStudyPanel')}
+          title={t('toggleStudyPanel')}
+          onclick={() => setStudyOpen(!studyOpen)}
+        >
+          {t('studyPanel')} <kbd>Ctrl+B</kbd>
+        </button>
         <button class="command-open" onclick={() => (showCommand = true)} aria-label={t('commandBar')}>
           {t('commandOpen')} <kbd>Ctrl+K</kbd>
         </button>
@@ -550,8 +646,25 @@
           onNext={goNext}
           onFontSize={(direction) => void saveSettings({ bible_font_size: resizeBibleFont(settings.bible_font_size, direction) })}
           onToggleStrong={() => void saveSettings({ show_strong_numbers: !settings.show_strong_numbers })}
+          onStrong={openStrong}
         />
       {/if}
+      <StudyPanel
+        bind:this={studyPanel}
+        {t}
+        open={studyOpen}
+        tab={studyTab}
+        {strongRequest}
+        selection={verseSelection}
+        commentaries={commentaryModules}
+        activeCommentaryIds={activeCommentaryIds}
+        onTab={(tab) => (studyTab = tab)}
+        onToggleCommentary={toggleCommentary}
+        onVerse={openVerse}
+        onEntry={openEntry}
+        onManageFolders={manageFolders}
+        onEscape={returnFocus}
+      />
     </main>
     {#if showCommand}
       <CommandBar

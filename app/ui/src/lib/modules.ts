@@ -31,10 +31,28 @@ export interface AppSettings {
   bible_font_size: number
   first_use_completed: boolean
   last_passage?: { book: number; chapter: number; verse?: number | null } | null
+  /** Léxicos em ordem de preferência; `null` usa o padrão (português primeiro). */
+  lexicon_module_ids?: string[] | null
+  /** Comentários ativos; `null` ativa todos os comentários prontos. */
+  commentary_module_ids?: string[] | null
+  study_panel_open?: boolean
 }
 
 export function isReady(module: ModuleInfo): boolean {
   return module.state === 'Ready'
+}
+
+export function readyCommentaries(modules: ModuleInfo[]): ModuleInfo[] {
+  return modules.filter((module) => module.kind === 'Commentary' && isReady(module))
+}
+
+/** Comentários ativos: a lista salva sem o que saiu da biblioteca, ou todos os prontos. */
+export function activeCommentaryIds(
+  saved: string[] | null | undefined,
+  modules: ModuleInfo[]
+): string[] {
+  const ready = readyCommentaries(modules).map((module) => module.id)
+  return saved ? saved.filter((id) => ready.includes(id)) : ready
 }
 
 export function stateMessage(module: ModuleInfo): 'protected' | 'unsupported' | 'corrupted' | null {

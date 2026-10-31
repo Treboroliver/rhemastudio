@@ -27,6 +27,7 @@
     onNext: () => void
     onFontSize: (direction: -1 | 0 | 1) => void
     onToggleStrong: () => void
+    onStrong?: (ids: string[], element: HTMLElement) => void
   }
 
   let {
@@ -51,8 +52,11 @@
     onPrevious,
     onNext,
     onFontSize,
-    onToggleStrong
+    onToggleStrong,
+    onStrong
   }: Props = $props()
+
+  const nodeActions = { onStrong: (ids: string[], element: HTMLElement) => onStrong?.(ids, element) }
 
   let viewportWidth = $state(typeof window === 'undefined' ? 1200 : window.innerWidth)
   let rendered = $state(20)
@@ -118,7 +122,10 @@
 
   function focusRow(number: number) {
     const row = rowsElement?.querySelector<HTMLElement>(`[data-verse="${number}"]`)
-    row?.focus()
+    const focused = document.activeElement
+    // Não tira o foco de uma palavra (Strong) ou nota que acabou de receber um clique.
+    const keepFocus = !!focused && focused !== row && !!rowsElement?.contains(focused)
+    if (!keepFocus) row?.focus()
     if (typeof row?.scrollIntoView === 'function') row.scrollIntoView({ block: 'nearest' })
     if (pendingFocus === number) pendingFocus = null
   }
@@ -212,7 +219,7 @@
                 <div class="parallel-cell" class:missing-verse={nodes === null || nodes === undefined} aria-label={nodes === null || nodes === undefined ? t('verseMissing') : undefined}>
                   {#if nodes}
                     <sup class="verse-number">{row.number}</sup>
-                    <NodeView {nodes} {t} showStrong={showStrong} />
+                    <NodeView {nodes} {t} showStrong={showStrong} actions={nodeActions} />
                   {:else}
                     <span class="missing-verse-space" aria-hidden="true"></span>
                   {/if}

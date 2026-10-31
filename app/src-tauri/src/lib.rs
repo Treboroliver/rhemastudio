@@ -13,8 +13,12 @@ use tauri_plugin_dialog::DialogExt;
 use thiserror::Error;
 
 mod reader;
+mod study;
 
 use reader::{ApiError, BookInfo, ChapterDto, READER_CACHE_CAPACITY, ReaderCache, ResolveDto};
+use study::{STUDY_CACHE_CAPACITY, StudyCache};
+
+const SETTINGS_SCHEMA_VERSION: u32 = 3;
 
 fn legacy_schema_version() -> u32 {
     1
@@ -41,12 +45,17 @@ pub struct AppSettings {
     pub bible_font_size: u8,
     pub first_use_completed: bool,
     pub last_passage: Option<LastPassage>,
+    /// Léxicos em ordem de preferência. `None`: dicionários prontos em português primeiro.
+    pub lexicon_module_ids: Option<Vec<String>>,
+    /// Comentários ativos. `None`: todos os comentários prontos.
+    pub commentary_module_ids: Option<Vec<String>>,
+    pub study_panel_open: bool,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            schema_version: 2,
+            schema_version: SETTINGS_SCHEMA_VERSION,
             module_folders: Vec::new(),
             default_bible_id: None,
             selected_bible_ids: Vec::new(),
@@ -56,6 +65,9 @@ impl Default for AppSettings {
             bible_font_size: 20,
             first_use_completed: false,
             last_passage: None,
+            lexicon_module_ids: None,
+            commentary_module_ids: None,
+            study_panel_open: true,
         }
     }
 }
@@ -76,6 +88,10 @@ enum CommandError {
     InvalidFontSize,
     #[error("A Bíblia padrão precisa ser uma Bíblia pronta da biblioteca.")]
     InvalidDefaultBible,
+    #[error("Os léxicos precisam ser dicionários prontos da biblioteca.")]
+    InvalidLexiconModules,
+    #[error("Os comentários ativos precisam ser comentários prontos da biblioteca.")]
+    InvalidCommentaryModules,
     #[error("A última passagem lida não é válida.")]
     InvalidPassage,
     #[error("Não foi possível atualizar a biblioteca: {0}")]
@@ -90,6 +106,7 @@ struct AppState {
     settings: Mutex<AppSettings>,
     catalog: Mutex<Vec<ModuleInfo>>,
     readers: Arc<ReaderCache>,
+    study: Arc<StudyCache>,
 }
 
 impl AppState {
@@ -119,8 +136,8 @@ fn load_settings(path: &Path) -> Result<AppSettings, CommandError> {
         Ok(bytes) => {
             let mut settings: AppSettings = serde_json::from_slice(&bytes)
                 .map_err(|error| CommandError::Settings(format!("arquivo inválido: {error}")))?;
-            if settings.schema_version < 2 {
-                settings.schema_version = 2;
+            if settings.schema_version < SETTINGS_SCHEMA_VERSION {
+                settings.schema_version = SETTINGS_SCHEMA_VERSION;
                 let encoded = serde_json::to_vec_pretty(&settings)
                     .map_err(|error| CommandError::Settings(error.to_string()))?;
                 atomic_write(path, &encoded)
@@ -226,7 +243,7 @@ fn validate_settings(
     }
     settings.module_folders.sort();
     settings.module_folders.dedup();
-    settings.schema_version = 2;
+    settings.schema_version = SETTINGS_SCHEMA_VERSION;
     if !matches!(settings.interface_language.as_str(), "pt-BR" | "en") {
         return Err(CommandError::InvalidLanguage);
     }
@@ -261,7 +278,32 @@ fn validate_settings(
     {
         return Err(CommandError::InvalidDefaultBible);
     }
+    if let Some(ids) = &mut settings.lexicon_module_ids
+        && !prune_module_ids(ids, current_catalog, ModuleKind::Dictionary)
+    {
+        return Err(CommandError::InvalidLexiconModules);
+    }
+    if let Some(ids) = &mut settings.commentary_module_ids
+        && !prune_module_ids(ids, current_catalog, ModuleKind::Commentary)
+    {
+        return Err(CommandError::InvalidCommentaryModules);
+    }
     Ok(settings)
+}
+
+/// Remove duplicados e módulos que saíram da biblioteca. Devolve `false` quando um módulo que
+/// existe não é pronto (por exemplo, protegido) ou é de outro tipo.
+fn prune_module_ids(ids: &mut Vec<String>, catalog: &[ModuleInfo], kind: ModuleKind) -> bool {
+    let mut seen = std::collections::HashSet::new();
+    ids.retain(|id| seen.insert(id.clone()));
+    let rejected = ids.iter().any(|id| {
+        catalog
+            .iter()
+            .find(|module| module.id == *id)
+            .is_some_and(|module| module.kind != kind || module.state != ModuleState::Ready)
+    });
+    ids.retain(|id| catalog.iter().any(|module| module.id == *id));
+    !rejected
 }
 
 fn current_folders(state: &AppState) -> Result<Vec<PathBuf>, CommandError> {
@@ -407,6 +449,77 @@ fn resolve_reference(text: String, lang: String) -> ResolveDto {
     reader::resolve_reference(&text, &lang)
 }
 
+fn study_snapshot(state: &AppState) -> Result<(Vec<ModuleInfo>, AppSettings), ApiError> {
+    let catalog = state
+        .catalog
+        .lock()
+        .map_err(|_| ApiError::internal("catálogo indisponível"))?
+        .clone();
+    let settings = state
+        .settings()
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    Ok((catalog, settings))
+}
+
+#[tauri::command]
+async fn lookup_strong(
+    strong_id: String,
+    state: State<'_, AppState>,
+) -> Result<study::LexiconEntryDto, ApiError> {
+    let (catalog, settings) = study_snapshot(&state)?;
+    let lexicons = study::effective_lexicons(settings.lexicon_module_ids.as_deref(), &catalog);
+    let cache = Arc::clone(&state.study);
+    tauri::async_runtime::spawn_blocking(move || {
+        study::lookup_strong(&cache, &lexicons, &strong_id)
+    })
+    .await
+    .map_err(|error| ApiError::internal(error.to_string()))?
+}
+
+#[tauri::command]
+async fn get_commentary_index(
+    book: u8,
+    chapter: u16,
+    verse: u16,
+    state: State<'_, AppState>,
+) -> Result<study::CommentaryIndexDto, ApiError> {
+    let (catalog, settings) = study_snapshot(&state)?;
+    let active = study::effective_commentaries(settings.commentary_module_ids.as_deref(), &catalog);
+    let cache = Arc::clone(&state.study);
+    tauri::async_runtime::spawn_blocking(move || {
+        study::commentary_index(
+            &cache,
+            &active,
+            book,
+            chapter,
+            verse,
+            &settings.interface_language,
+        )
+    })
+    .await
+    .map_err(|error| ApiError::internal(error.to_string()))?
+}
+
+#[tauri::command]
+async fn get_commentary_entry(
+    module_id: String,
+    topic_id: i64,
+    offset: u32,
+    state: State<'_, AppState>,
+) -> Result<study::CommentaryPageDto, ApiError> {
+    let (catalog, _) = study_snapshot(&state)?;
+    let module = catalog
+        .into_iter()
+        .find(|module| module.id == module_id)
+        .ok_or_else(|| ApiError::new("module_not_found", "Módulo não encontrado na biblioteca."))?;
+    let cache = Arc::clone(&state.study);
+    tauri::async_runtime::spawn_blocking(move || {
+        study::commentary_entry(&cache, &module, topic_id, offset as usize)
+    })
+    .await
+    .map_err(|error| ApiError::internal(error.to_string()))?
+}
+
 #[tauri::command]
 fn book_names(lang: String) -> Vec<BookInfo> {
     reader::book_names(&lang)
@@ -475,6 +588,7 @@ pub fn run() {
                 settings: Mutex::new(settings),
                 catalog: Mutex::new(cached),
                 readers: Arc::new(ReaderCache::new(READER_CACHE_CAPACITY)),
+                study: Arc::new(StudyCache::new(STUDY_CACHE_CAPACITY)),
             });
             Ok(())
         })
@@ -487,6 +601,9 @@ pub fn run() {
             pick_folders,
             get_chapter,
             get_chapters,
+            lookup_strong,
+            get_commentary_index,
+            get_commentary_entry,
             resolve_reference,
             book_names,
             set_last_passage
@@ -552,14 +669,107 @@ mod tests {
         )
         .expect("write legacy settings");
         let settings = load_settings(&path).expect("load legacy settings");
-        assert_eq!(settings.schema_version, 2);
+        assert_eq!(settings.schema_version, 3);
         assert!(settings.selected_bible_ids.is_empty());
         assert!(!settings.show_strong_numbers);
         assert_eq!(settings.bible_font_size, 20);
         assert_eq!(settings.theme, "dark");
+        assert_eq!(settings.lexicon_module_ids, None);
+        assert_eq!(settings.commentary_module_ids, None);
+        assert!(settings.study_panel_open);
         let persisted = fs::read_to_string(path).expect("read migrated settings");
-        assert!(persisted.contains("\"schema_version\": 2"));
+        assert!(persisted.contains("\"schema_version\": 3"));
         assert!(persisted.contains("\"selected_bible_ids\": []"));
+        assert!(persisted.contains("\"study_panel_open\": true"));
+    }
+
+    #[test]
+    fn version_two_settings_gain_study_defaults_without_losing_values() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{"schema_version":2,"module_folders":[],"default_bible_id":"bible-1","selected_bible_ids":["bible-1"],"interface_language":"en","theme":"light","show_strong_numbers":true,"bible_font_size":24,"first_use_completed":true,"last_passage":{"book":43,"chapter":3,"verse":16}}"#,
+        )
+        .expect("write version two settings");
+        let settings = load_settings(&path).expect("migrate version two settings");
+        assert_eq!(settings.schema_version, 3);
+        assert_eq!(settings.theme, "light");
+        assert_eq!(settings.bible_font_size, 24);
+        assert!(settings.show_strong_numbers);
+        assert_eq!(settings.selected_bible_ids, ["bible-1"]);
+        assert_eq!(settings.lexicon_module_ids, None);
+        assert_eq!(settings.commentary_module_ids, None);
+        assert!(settings.study_panel_open);
+        assert_eq!(load_settings(&path).expect("reload migrated"), settings);
+    }
+
+    fn study_module(id: &str, kind: ModuleKind, state: ModuleState, language: &str) -> ModuleInfo {
+        let mut module = ready_bible();
+        module.id = id.into();
+        module.kind = kind;
+        module.state = state;
+        module.language = Some(language.into());
+        module
+    }
+
+    #[test]
+    fn study_module_lists_are_validated_pruned_and_never_accept_protected_modules() {
+        let catalog = vec![
+            study_module("dict-pt", ModuleKind::Dictionary, ModuleState::Ready, "pt"),
+            study_module(
+                "dict-locked",
+                ModuleKind::Dictionary,
+                ModuleState::Protected,
+                "pt",
+            ),
+            study_module("cmt-1", ModuleKind::Commentary, ModuleState::Ready, "pt"),
+            study_module(
+                "cmt-locked",
+                ModuleKind::Commentary,
+                ModuleState::Protected,
+                "pt",
+            ),
+        ];
+        let valid = AppSettings {
+            lexicon_module_ids: Some(vec!["dict-pt".into(), "dict-pt".into(), "gone".into()]),
+            commentary_module_ids: Some(vec!["cmt-1".into()]),
+            ..AppSettings::default()
+        };
+        let validated = validate_settings(valid, &catalog).expect("valid study settings");
+        assert_eq!(
+            validated.lexicon_module_ids,
+            Some(vec!["dict-pt".to_string()])
+        );
+        assert_eq!(
+            validated.commentary_module_ids,
+            Some(vec!["cmt-1".to_string()])
+        );
+
+        let locked_lexicon = AppSettings {
+            lexicon_module_ids: Some(vec!["dict-locked".into()]),
+            ..AppSettings::default()
+        };
+        assert!(matches!(
+            validate_settings(locked_lexicon, &catalog),
+            Err(CommandError::InvalidLexiconModules)
+        ));
+        let locked_commentary = AppSettings {
+            commentary_module_ids: Some(vec!["cmt-locked".into()]),
+            ..AppSettings::default()
+        };
+        assert!(matches!(
+            validate_settings(locked_commentary, &catalog),
+            Err(CommandError::InvalidCommentaryModules)
+        ));
+        let wrong_kind = AppSettings {
+            commentary_module_ids: Some(vec!["dict-pt".into()]),
+            ..AppSettings::default()
+        };
+        assert!(matches!(
+            validate_settings(wrong_kind, &catalog),
+            Err(CommandError::InvalidCommentaryModules)
+        ));
     }
 
     #[test]
@@ -616,7 +826,7 @@ mod tests {
             ..AppSettings::default()
         };
         let validated = validate_settings(valid, &bibles).expect("valid parallel settings");
-        assert_eq!(validated.schema_version, 2);
+        assert_eq!(validated.schema_version, 3);
         assert_eq!(validated.selected_bible_ids, ["bible-2", "bible-1"]);
 
         let too_many = AppSettings {

@@ -12,13 +12,68 @@ export type UiNode =
         | 'wordsOfJesus'
         | 'otQuote'
         | 'note'
-        | 'link'
       children: UiNode[]
     }
+  | { type: 'link'; children: UiNode[]; hint?: string }
+  | { type: 'verseLink'; book: number; chapter: number; verse: number; children: UiNode[] }
+  | { type: 'entryLink'; lang: 'G' | 'H'; num: number; children: UiNode[] }
   | { type: 'heading'; level: number; children: UiNode[] }
   | { type: 'strong'; lang: 'G' | 'H'; num: number; children: UiNode[] }
   | { type: 'paragraph' }
   | { type: 'lineBreak' }
+
+/** Há texto visível (ou quebra de linha) no conteúdo? */
+export function hasVisibleContent(nodes: UiNode[]): boolean {
+  return nodes.some((node) => {
+    if (node.type === 'text') return node.value.trim().length > 0
+    if (node.type === 'paragraph' || node.type === 'lineBreak') return false
+    return hasVisibleContent(node.children)
+  })
+}
+
+/** Divide o conteúdo nos parágrafos de nível superior, descartando os vazios. */
+export function splitParagraphs(nodes: UiNode[]): UiNode[][] {
+  const groups: UiNode[][] = []
+  let current: UiNode[] = []
+  for (const node of nodes) {
+    if (node.type === 'paragraph') {
+      if (hasVisibleContent(current)) groups.push(current)
+      current = []
+    } else {
+      current.push(node)
+    }
+  }
+  if (hasVisibleContent(current)) groups.push(current)
+  return groups
+}
+
+/** Ações de clique do conteúdo renderizado; sem uma ação, o nó aparece como texto simples. */
+export interface NodeActions {
+  /** Palavra com um ou mais Strong (do mais externo ao mais interno) e o elemento clicado. */
+  onStrong?: (ids: string[], element: HTMLElement) => void
+  onVerse?: (target: { book: number; chapter: number; verse: number }) => void
+  /** Chave de verbete, como `G25`. */
+  onEntry?: (id: string) => void
+}
+
+/**
+ * Strong consecutivos sobre a mesma palavra chegam aninhados. Devolve todos os números e o
+ * conteúdo da palavra, para renderizar um único botão por palavra.
+ */
+export function strongChain(node: Extract<UiNode, { type: 'strong' }>): {
+  ids: string[]
+  children: UiNode[]
+} {
+  const ids: string[] = []
+  let current: Extract<UiNode, { type: 'strong' }> = node
+  for (;;) {
+    const id = `${current.lang}${current.num}`
+    if (!ids.includes(id)) ids.push(id)
+    const only = current.children.length === 1 ? current.children[0] : null
+    if (!only || only.type !== 'strong') return { ids, children: current.children }
+    current = only
+  }
+}
 
 export interface VerseDto {
   number: number

@@ -4,6 +4,8 @@ use std::path::Path;
 use rhema_core::{Book, ModuleError, Node, StrongLang, VerseRef};
 use rusqlite::{types::Value, Connection, OpenFlags, OptionalExtension, Row};
 
+use crate::RtfPage;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TwmKind {
     Commentary,
@@ -113,6 +115,40 @@ impl TwmModule {
         if content_type != "rtf" {
             return Err(ModuleError::UnsupportedContent(content_type));
         }
+        let bytes = self.read_content_bytes(topic_id)?;
+        crate::decode_twm_content(&content_type, &bytes)
+    }
+
+    fn decode_content_page(
+        &self,
+        topic_id: i64,
+        row_type: Option<&str>,
+        offset: usize,
+        max_paragraphs: usize,
+    ) -> Result<RtfPage, ModuleError> {
+        let content_type = self.content_type(row_type);
+        if content_type != "rtf" {
+            return Err(ModuleError::UnsupportedContent(content_type));
+        }
+        let bytes = self.read_content_bytes(topic_id)?;
+        crate::decode_twm_content_page(&content_type, &bytes, offset, max_paragraphs)
+    }
+
+    /// Tamanho bruto do conteúdo, sem convertê-lo.
+    fn content_size(&self, topic_id: i64) -> Result<Option<u64>, ModuleError> {
+        let size: Option<Option<i64>> = self
+            .connection
+            .query_row(
+                "SELECT length(CAST(data AS BLOB)) FROM content WHERE topic_id = ?1",
+                [topic_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(corrupted)?;
+        Ok(size.flatten().and_then(|value| u64::try_from(value).ok()))
+    }
+
+    fn read_content_bytes(&self, topic_id: i64) -> Result<Vec<u8>, ModuleError> {
         let data: Value = self
             .connection
             .query_row(
@@ -125,21 +161,16 @@ impl TwmModule {
             .ok_or_else(|| {
                 ModuleError::Corrupted(format!("Conteúdo ausente para id {topic_id}"))
             })?;
-        let bytes = match data {
-            Value::Text(text) => text.into_bytes(),
-            Value::Blob(bytes) => bytes,
-            Value::Null => {
-                return Err(ModuleError::Corrupted(format!(
-                    "Conteúdo NULL para id {topic_id}"
-                )))
-            }
-            _ => {
-                return Err(ModuleError::Corrupted(format!(
-                    "Tipo SQLite de conteúdo inválido para id {topic_id}"
-                )))
-            }
-        };
-        crate::decode_twm_content(&content_type, &bytes)
+        match data {
+            Value::Text(text) => Ok(text.into_bytes()),
+            Value::Blob(bytes) => Ok(bytes),
+            Value::Null => Err(ModuleError::Corrupted(format!(
+                "Conteúdo NULL para id {topic_id}"
+            ))),
+            _ => Err(ModuleError::Corrupted(format!(
+                "Tipo SQLite de conteúdo inválido para id {topic_id}"
+            ))),
+        }
     }
 
     fn validate_table(&self, table: &str, required: &[&str]) -> Result<(), ModuleError> {
@@ -215,10 +246,27 @@ struct CommentaryRef {
     content_type: Option<String>,
 }
 
+/// Cabeçalho de uma entrada de comentário; não inclui o conteúdo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommentaryHeader {
+    pub topic_id: i64,
+    pub bi: u8,
+    pub ci: u16,
+    pub fvi: u16,
+    pub tvi: u16,
+    pub scope: CommentaryScope,
+    /// Tipo efetivo do conteúdo (`rtf`, `rvf`, ...).
+    pub content_type: String,
+    /// Falso quando o formato ainda não tem conversor (por exemplo, RVF).
+    pub supported: bool,
+    pub size_bytes: Option<u64>,
+}
+
 pub struct CommentarySource {
     module: TwmModule,
     refs: Vec<CommentaryRef>,
     by_book: HashMap<Book, Vec<usize>>,
+    by_topic: HashMap<i64, usize>,
 }
 
 impl CommentarySource {
@@ -254,17 +302,20 @@ impl CommentarySource {
         drop(rows);
         drop(statement);
         let mut by_book = HashMap::<Book, Vec<usize>>::new();
+        let mut by_topic = HashMap::<i64, usize>::new();
         for (index, reference) in refs.iter().enumerate() {
             by_book.entry(reference.book).or_default().push(index);
+            by_topic.insert(reference.topic_id, index);
         }
         Ok(Self {
             module,
             refs,
             by_book,
+            by_topic,
         })
     }
 
-    pub fn entries_for(&self, verse: VerseRef) -> Result<Vec<CommentaryEntry>, ModuleError> {
+    fn matching(&self, verse: VerseRef) -> Result<Vec<&CommentaryRef>, ModuleError> {
         if verse.validate().is_err() {
             return Err(ModuleError::InvalidReference(verse));
         }
@@ -277,7 +328,12 @@ impl CommentarySource {
             .filter(|entry| reference_contains(entry, verse))
             .collect::<Vec<_>>();
         matching.sort_by_key(|entry| specificity_key(entry));
-        Ok(matching
+        Ok(matching)
+    }
+
+    pub fn entries_for(&self, verse: VerseRef) -> Result<Vec<CommentaryEntry>, ModuleError> {
+        Ok(self
+            .matching(verse)?
             .into_iter()
             .map(|entry| CommentaryEntry {
                 topic_id: entry.topic_id,
@@ -291,6 +347,48 @@ impl CommentarySource {
                     .decode_content(entry.topic_id, entry.content_type.as_deref()),
             })
             .collect())
+    }
+
+    /// Cabeçalhos das entradas que cobrem o versículo, da mais específica à mais ampla.
+    /// Não lê nem converte o conteúdo; somente o tamanho bruto é consultado.
+    pub fn headers_for(&self, verse: VerseRef) -> Result<Vec<CommentaryHeader>, ModuleError> {
+        self.matching(verse)?
+            .into_iter()
+            .map(|entry| {
+                let content_type = self.module.content_type(entry.content_type.as_deref());
+                Ok(CommentaryHeader {
+                    topic_id: entry.topic_id,
+                    bi: entry.book.number(),
+                    ci: entry.chapter,
+                    fvi: entry.from_verse,
+                    tvi: entry.to_verse,
+                    scope: scope_for(entry),
+                    supported: content_type == "rtf",
+                    content_type,
+                    size_bytes: self.module.content_size(entry.topic_id)?,
+                })
+            })
+            .collect()
+    }
+
+    /// Converte uma página de parágrafos de uma entrada conhecida deste módulo.
+    pub fn entry_page(
+        &self,
+        topic_id: i64,
+        offset: usize,
+        max_paragraphs: usize,
+    ) -> Result<RtfPage, ModuleError> {
+        let entry = self
+            .by_topic
+            .get(&topic_id)
+            .and_then(|index| self.refs.get(*index))
+            .ok_or_else(|| ModuleError::NotFound(format!("entrada {topic_id}")))?;
+        self.module.decode_content_page(
+            entry.topic_id,
+            entry.content_type.as_deref(),
+            offset,
+            max_paragraphs,
+        )
     }
 }
 
@@ -430,6 +528,35 @@ pub fn strong_key(lang: StrongLang, number: u32) -> String {
         StrongLang::Hebrew => 'H',
     };
     format!("{prefix}{number}")
+}
+
+/// Normaliza uma chave de Strong: `g0025`, `G25a` e ` G25 ` viram `(Greek, 25)`.
+/// Aceita zeros à esquerda e um sufixo de letras; rejeita número zero ou longo demais.
+pub fn normalize_strong_key(text: &str) -> Option<(StrongLang, u32)> {
+    let text = text.trim();
+    let mut chars = text.chars();
+    let lang = match chars.next()?.to_ascii_uppercase() {
+        'G' => StrongLang::Greek,
+        'H' => StrongLang::Hebrew,
+        _ => return None,
+    };
+    let rest = chars.as_str();
+    let digits_end = rest
+        .find(|character: char| !character.is_ascii_digit())
+        .unwrap_or(rest.len());
+    let (digits, suffix) = rest.split_at(digits_end);
+    if digits.is_empty()
+        || !suffix
+            .chars()
+            .all(|character| character.is_ascii_alphabetic())
+    {
+        return None;
+    }
+    let significant = digits.trim_start_matches('0');
+    if significant.is_empty() || significant.len() > 5 {
+        return None;
+    }
+    significant.parse::<u32>().ok().map(|number| (lang, number))
 }
 
 fn module_kind(config: &HashMap<String, String>, path: &Path) -> Result<TwmKind, ModuleError> {
@@ -572,7 +699,7 @@ mod tests {
     use super::*;
     use gen_fixtures::{
         generate_synthetic_commentary_twm, generate_synthetic_dictionary_twm,
-        generate_synthetic_protected_twm,
+        generate_synthetic_protected_twm, generate_synthetic_study_commentary_twm,
     };
     use proptest::prelude::*;
     use tempfile::tempdir;
@@ -691,6 +818,77 @@ mod tests {
         assert!(matches!(
             rvf.content,
             Err(ModuleError::UnsupportedContent(ref kind)) if kind == "rvf"
+        ));
+    }
+
+    #[test]
+    fn normalizes_strong_keys() {
+        use StrongLang::{Greek, Hebrew};
+        assert_eq!(normalize_strong_key("G25"), Some((Greek, 25)));
+        assert_eq!(normalize_strong_key(" g0025 "), Some((Greek, 25)));
+        assert_eq!(normalize_strong_key("G25a"), Some((Greek, 25)));
+        assert_eq!(normalize_strong_key("h00430"), Some((Hebrew, 430)));
+        for invalid in [
+            "", "G", "G0", "G000", "25", "X25", "G2 5", "G25-1", "G123456", "G25é",
+        ] {
+            assert_eq!(normalize_strong_key(invalid), None, "{invalid:?}");
+        }
+    }
+
+    #[test]
+    fn commentary_headers_do_not_decode_content_and_page_on_demand() {
+        let directory = tempdir().expect("diretório temporário");
+        let path = directory.path().join("study.cmt.twm");
+        generate_synthetic_study_commentary_twm(&path, 150).expect("gerar comentário");
+        let source = CommentarySource::open(&path).expect("abrir comentário");
+        let headers = source
+            .headers_for(VerseRef::new(Book::John, 3, 16))
+            .expect("cabeçalhos");
+        assert_eq!(
+            headers
+                .iter()
+                .map(|header| header.topic_id)
+                .collect::<Vec<_>>(),
+            [40, 50, 70, 30, 60, 20, 10]
+        );
+        assert!(headers[0].size_bytes.unwrap_or_default() > 1_000);
+        let unsupported = headers
+            .iter()
+            .filter(|header| !header.supported)
+            .map(|header| (header.topic_id, header.content_type.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(unsupported, [(50, "rvf")]);
+
+        let first = source.entry_page(40, 0, 60).expect("primeira página");
+        let paragraphs = |page: &RtfPage| {
+            page.nodes
+                .iter()
+                .filter(|node| matches!(node, Node::Paragraph))
+                .count()
+        };
+        assert_eq!(paragraphs(&first), 60);
+        assert!(first.has_more);
+        let second = source
+            .entry_page(40, first.next_offset, 60)
+            .expect("segunda");
+        let third = source
+            .entry_page(40, second.next_offset, 60)
+            .expect("terceira");
+        assert_eq!(paragraphs(&second), 60);
+        assert_eq!(paragraphs(&third), 30);
+        assert!(second.has_more && !third.has_more);
+
+        assert!(matches!(
+            source.entry_page(50, 0, 60),
+            Err(ModuleError::UnsupportedContent(kind)) if kind == "rvf"
+        ));
+        assert!(matches!(
+            source.entry_page(999, 0, 60),
+            Err(ModuleError::NotFound(_))
+        ));
+        assert!(matches!(
+            source.headers_for(VerseRef::new(Book::John, 0, 1)),
+            Err(ModuleError::InvalidReference(_))
         ));
     }
 

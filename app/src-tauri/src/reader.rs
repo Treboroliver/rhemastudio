@@ -9,10 +9,12 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use rhema_core::{Book, ModuleError, Node, StrongLang, Testament, VerseRange, VerseRef};
+use rhema_core::{
+    Book, LinkTarget, ModuleError, Node, StrongLang, Testament, VerseRange, VerseRef,
+};
 use rhema_library::{ModuleInfo, ModuleState};
 use rhema_refs::{FormatStyle, Language, RefError, format, parse, suggest_books};
-use rhema_twformat::OntReader;
+use rhema_twformat::{OntReader, normalize_strong_key};
 use serde::Serialize;
 
 /// Quantidade máxima de Bíblias abertas ao mesmo tempo.
@@ -110,7 +112,23 @@ pub enum UiNode {
     Note {
         children: Vec<UiNode>,
     },
+    /// Link sem ação: o tipo de destino é desconhecido. `hint` é só o subtipo, nunca o endereço.
     Link {
+        children: Vec<UiNode>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        hint: Option<String>,
+    },
+    /// Link para um versículo (início da faixa): a interface navega a leitura.
+    VerseLink {
+        book: u8,
+        chapter: u16,
+        verse: u16,
+        children: Vec<UiNode>,
+    },
+    /// Link para outro verbete de Strong.
+    EntryLink {
+        lang: &'static str,
+        num: u32,
         children: Vec<UiNode>,
     },
     Paragraph,
@@ -194,9 +212,7 @@ fn convert_node(node: &Node, out: &mut Vec<UiNode>) {
         Node::Note(children) => out.push(UiNode::Note {
             children: wrap(children),
         }),
-        Node::Link { children, .. } => out.push(UiNode::Link {
-            children: wrap(children),
-        }),
+        Node::Link { target, children } => out.push(convert_link(target, wrap(children))),
         Node::Paragraph => out.push(UiNode::Paragraph),
         Node::LineBreak => out.push(UiNode::LineBreak),
         Node::UnknownTag { children, .. } => {
@@ -206,6 +222,53 @@ fn convert_node(node: &Node, out: &mut Vec<UiNode>) {
         }
         Node::Grammar { .. } | Node::Morph(_) | Node::XRef(_) => {}
     }
+}
+
+/// Converte o destino de um link. Versículos e verbetes G/H são acionáveis; os demais ficam
+/// como texto simples com o subtipo desconhecido, sem expor o endereço do módulo.
+fn convert_link(target: &LinkTarget, children: Vec<UiNode>) -> UiNode {
+    match target {
+        LinkTarget::Bible(range) => UiNode::VerseLink {
+            book: range.start.book.number(),
+            chapter: range.start.chapter,
+            verse: range.start.verse,
+            children,
+        },
+        LinkTarget::Dictionary(key) => match normalize_strong_key(key) {
+            Some((lang, num)) => UiNode::EntryLink {
+                lang: strong_letter(lang),
+                num,
+                children,
+            },
+            None => UiNode::Link {
+                children,
+                hint: Some("dictionary".to_string()),
+            },
+        },
+        LinkTarget::Other(address) => UiNode::Link {
+            children,
+            hint: link_subtype(address),
+        },
+    }
+}
+
+fn strong_letter(lang: StrongLang) -> &'static str {
+    match lang {
+        StrongLang::Greek => "G",
+        StrongLang::Hebrew => "H",
+    }
+}
+
+/// Subtipo curto do endereço (`person` em `tw://person.x?id=1`), limitado a caracteres seguros.
+fn link_subtype(address: &str) -> Option<String> {
+    let trimmed = address.trim();
+    let rest = trimmed.strip_prefix("tw://").unwrap_or(trimmed);
+    let subtype = rest
+        .chars()
+        .take_while(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+        .take(24)
+        .collect::<String>();
+    (!subtype.is_empty()).then_some(subtype)
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

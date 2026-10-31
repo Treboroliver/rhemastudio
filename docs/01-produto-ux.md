@@ -78,7 +78,7 @@ Conta de usuário, nuvem própria, IA generativa embutida, apócrifos/versifica�
 | `Alt+1..4` | Alternar tradução paralela |
 | `Ctrl+Shift+S` | Mostrar/ocultar números de Strong |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Aumentar / diminuir / restaurar fonte bíblica |
-| `Ctrl+B` | Mostrar/ocultar biblioteca |
+| `Ctrl+B` | Mostrar/ocultar o painel de estudo (Léxico/Comentário) |
 | `Ctrl+Enter` | Inserir seleção no sermão |
 | `/` no editor | Menu de inserção (versículo, léxico, nota) |
 
@@ -88,7 +88,7 @@ Conta de usuário, nuvem própria, IA generativa embutida, apócrifos/versifica�
 - Destaque âmbar `#d97706` / `#fbbf24` (reverente, quente)
 - Chips de referência em azul `#60a5fa`
 - Texto bíblico: fonte serifada (ex.: Source Serif 4); interface: sans-serif legível (ex.: IBM Plex Sans)
-- Número de Strong: oculto por padrão; hover/foco com realce discreto e cursor de ponteiro. O interruptor mostra o sublinhado tracejado âmbar; o clique será ligado na M4.
+- Número de Strong: oculto por padrão; hover/foco com realce discreto e cursor de ponteiro. O interruptor mostra o sublinhado tracejado âmbar. Desde a M4a, o clique (ou Enter, com foco) abre a aba Léxico do painel direito, com o interruptor ligado ou desligado.
 
 ## 8. Acessibilidade e idioma
 

@@ -62,17 +62,19 @@ Marque `[x]` ao concluir. Cada milestone só termina quando **todos** os critér
 - [x] M3a.1 Correções da leitura (tokenizador `<`/`>`, capítulo parcial, lotes); checklist manual em `docs/03-verificacao-manual.md`
 - [x] M3.6 Temas escuro/claro/automático, tokens CSS com contraste validado por teste, tamanho do texto de 14–32 px (padrão 20) e configurações versionadas/migradas.
 - [x] M3b Strong: oculto por padrão, realce em hover/foco e interruptor persistente; clique continua sem ação até M4.
+- [ ] M3.7 Teste de fluxo completo (Playwright): abrir o app, ler, abrir Strong e comentário, navegar por link e recolher o painel — **pendente**, não faz parte do M4a.
 
 **Aceite:** do app aberto a duas Bíblias lado a lado em ≤ 5 interações; leitura paralela alinhada e responsiva validada por Vitest; capítulo abre em < 30 ms.
 
 ---
 
 ## M4 — Estudo: Strong, comentários, referências
-- [ ] M4.1 Strong clicável → `StrongPopover` e aba Léxico
-- [ ] M4.2 Comentários seguindo o versículo (específico → amplo)
-- [ ] M4.3 Chips de referência cruzada com cartão de prévia no hover
-- [ ] M4.4 Aba Referências (todas as ligações do versículo)
-- [ ] M4.5 Estados vazios amigáveis ("Instale um dicionário para ver o léxico")
+- [x] M4.1 Strong clicável → aba Léxico do painel direito (o `StrongPopover` ficou fora; o painel abre com o clique ou Enter, mesmo com o interruptor de Strong desligado)
+- [x] M4.2 Comentários seguindo o versículo (específico → amplo), por módulo ativo, com conteúdo sob demanda e paginado
+- [ ] M4.3 Chips de referência cruzada com cartão de prévia no hover (M4b)
+- [ ] M4.4 Aba Referências (todas as ligações do versículo) (M4b)
+- [x] M4.5 Estados vazios amigáveis ("Instale um dicionário para ver o léxico")
+- Pendente de M4a para M4b: parser RVF (M1.5). Verbetes e comentários em RVF mostram aviso por entrada e não derrubam os demais.
 
 **Aceite:** clicar em "amou" em João 3:16 (módulo com Strong) abre a entrada G25; selecionar um versículo atualiza o comentário em < 100 ms; sem dicionário instalado, a mensagem orienta o usuário.
 

@@ -1,5 +1,25 @@
 # Changelog — RhemaStudio
 
+## [M4a] — 2026-10-31
+
+### Concluído (M4.1, M4.2 e M4.5)
+- `rhema-twformat`: `convert_rtf_page` converte só uma janela de parágrafos (o texto anterior é percorrido sem virar nós e a leitura termina ao achar conteúdo depois da janela); `CommentarySource::headers_for` lista cabeçalhos (escopo, tipo efetivo, `supported`, tamanho) sem ler o conteúdo e `entry_page` pagina a entrada; `normalize_strong_key` (`g0025`, `G25a` → `G25`). Fixtures sintéticas novas em `tools/gen-fixtures` (comentário com entrada longa, RVF e links; dicionário com G25/G26 RVF/H430/G1).
+- App (`study.rs`): comandos `lookup_strong`, `get_commentary_index` e `get_commentary_entry` com erros de código estável (`no_lexicon_installed`, `entry_not_found`, `unsupported_format`, `invalid_strong_id`, além dos existentes). Cache LRU próprio de 6 leitores para léxicos e 6 para comentários. Módulos não prontos nunca são abertos; o leitor ainda recusa arquivos com flags de proteção. O índice abre módulos distintos em paralelo. Páginas de 60 parágrafos com `has_more`.
+- Links RTF: versículo → `verseLink` (navega), verbete G/H → `entryLink` (abre verbete), demais → texto com dica do subtipo (nunca o endereço).
+- Configurações versão 3: `lexicon_module_ids` e `commentary_module_ids` (`null` = padrão calculado do catálogo: léxicos em português primeiro; todos os comentários prontos) e `study_panel_open`. Arquivo versão 1 ou 2 carrega com padrões e é regravado de forma atômica. Módulo protegido ou de outro tipo é recusado; ids que saíram da biblioteca são descartados.
+- Interface: painel direito de 420 px (recolhível com Ctrl+B e pelo botão "Estudo"; estado salvo) com abas Léxico e Comentário (←/→/Home/End; Referências oculta até a M4b); Strong clicável por clique ou Enter, mesmo com o interruptor desligado, com palavra destacada, lista para palavras com mais de um Strong, botão voltar entre verbetes, foco no painel ao abrir e Esc devolvendo o foco à palavra; comentários seguem o versículo (150 ms), agrupados por módulo, expansão sob demanda, "Mostrar mais", aviso por entrada RVF, caixas para ativar/desativar módulos (salvas) e estados vazios/carregando/erro. `NodeView` ganhou ações de clique; RTF renderiza negrito, itálico, sublinhado, sobrescrito, parágrafos e links, sem `{@html}`. Token `--link` e novos pares no teste de contraste (4,5:1 nos dois temas).
+- Correção encontrada: `App.svelte` recarregava o capítulo a cada seleção de versículo (a dependência era o objeto `passage`), recriando o texto e perdendo foco e a palavra clicada. Agora só recarrega quando livro ou capítulo mudam.
+
+### Resultados (RHEMA_TEST_MODULES, release; só números e tempos)
+- Strong_AMG2 (lookup, frio/quente): G25 achado, 9,2 ms na primeira consulta; G26 achado, 2,6 ms; G3056 retorna `unsupported_format` (entrada RVF), 1,5–2,7 ms; H430 achado, 0,7 ms. Mickelson (protegido) foi ignorado.
+- Comentários ativos (Holman-AT, NICNT, VidaNova): Jo 3:16 → 0 / 4 / 1 cabeçalhos (VidaNova 1 RVF); Gn 1:1 → 2 / 0 / 2 (VidaNova 2 RVF). Índice frio (abre os três módulos) 65–80 ms; quente 2,5–9 ms. A abertura isolada de VidaNova levou 47 ms (a primeira medida de Gn 1:1 chegou a 249 ms com o arquivo fora do cache do sistema).
+- Primeira página da maior entrada suportada de Jo 3:16/Gn 1:1: 978 KB, 60 parágrafos, `has_more` verdadeiro, 19–33 ms frio e 5–8 ms quente.
+- Testes: Rust (fixtures de léxico/comentário, RVF isolado, protegido recusado, paginação, cache, migração) e Vitest (NodeView, léxico, comentário, painel, aplicativo completo com `invoke` simulado).
+
+### Em aberto
+- Validação manual no app com módulos reais (checklist M4a) e conferência visual dos dois temas; não foi possível abrir o navegador integrado nesta etapa.
+- M3.7 (Playwright de fluxo completo) segue pendente; M4.3/M4.4 e o parser RVF ficam para a M4b/M1.5.
+
 ## [M3b] — 2026-10-31
 
 ### Concluído

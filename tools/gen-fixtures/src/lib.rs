@@ -251,6 +251,77 @@ pub fn generate_synthetic_protected_twm(path: &Path, flag: &str) -> Result<()> {
     Ok(())
 }
 
+/// Comentário sintético para a interface de estudo: entradas de todos os escopos em João 3,
+/// uma entrada longa (`paragraphs` parágrafos), uma entrada RVF e uma com links.
+pub fn generate_synthetic_study_commentary_twm(path: &Path, paragraphs: usize) -> Result<()> {
+    let connection = create_twm(path, "2", "rtf")?;
+    connection.execute_batch(
+        "CREATE TABLE bible_refs (
+            topic_id INTEGER PRIMARY KEY,
+            bi INTEGER, ci INTEGER, fvi INTEGER, tvi INTEGER, content_type TEXT
+        );
+        CREATE TABLE content (topic_id INTEGER PRIMARY KEY, data BLOB, data2 BLOB);
+        INSERT INTO bible_refs VALUES
+            (10, 43, 0, 0, 0, 'rtf'),
+            (20, 43, 3, 0, 0, 'rtf'),
+            (30, 43, 3, 15, 17, 'rtf'),
+            (40, 43, 3, 16, 16, 'rtf'),
+            (50, 43, 3, 16, 16, 'rvf'),
+            (60, 43, 3, 1, 36, 'rtf'),
+            (70, 43, 3, 16, 16, 'rtf');
+        INSERT INTO content VALUES
+            (10, '{\\rtf1 Synthetic book introduction\\par}', NULL),
+            (20, '{\\rtf1 Synthetic chapter introduction\\par}', NULL),
+            (30, '{\\rtf1 Synthetic verse range\\par}', NULL),
+            (50, 'RVF fixture; deliberately unsupported', NULL),
+            (60, '{\\rtf1 Synthetic whole chapter\\par}', NULL);",
+    )?;
+    let mut long = String::from("{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Arial;}}");
+    for index in 1..=paragraphs {
+        long.push_str(&format!(
+            "Synthetic paragraph {index} {{\\b bold}} {{\\i italic}} {{\\ul under}} x{{\\super 2}}\\par "
+        ));
+    }
+    long.push('}');
+    let links = concat!(
+        "{\\rtf1 See ",
+        "{\\field{\\*\\fldinst HYPERLINK \"tw://bible.*?id=43.3.16|_AUTODETECT_|\"}{\\fldrslt verse link}} ",
+        "{\\field{\\*\\fldinst HYPERLINK \"_STRONG_G26|_NOLINK_\"}{\\fldrslt entry link}} ",
+        "{\\field{\\*\\fldinst HYPERLINK \"tw://person.xyz?id=7\"}{\\fldrslt other link}}",
+        "\\par}"
+    );
+    for (topic, data) in [(40_i64, long.as_str()), (70, links)] {
+        connection.execute(
+            "INSERT INTO content (topic_id, data, data2) VALUES (?1, ?2, NULL)",
+            (topic, data),
+        )?;
+    }
+    Ok(())
+}
+
+/// Dicionário sintético: G25 com links, G26 em RVF, H430 e G1 com link de tipo desconhecido.
+pub fn generate_synthetic_study_dictionary_twm(path: &Path) -> Result<()> {
+    let connection = create_twm(path, "1", "rtf")?;
+    connection.execute_batch(
+        "CREATE TABLE topics (
+            id INTEGER PRIMARY KEY, pid INTEGER, subject TEXT, rel_order INTEGER,
+            content_type TEXT, strong_orig_word TEXT
+        );
+        CREATE TABLE content (topic_id INTEGER PRIMARY KEY, data TEXT, data2 BLOB);
+        INSERT INTO topics VALUES
+            (1, 0, 'G25', 1, NULL, 'synthetic-lemma'),
+            (2, 0, 'G26', 1, 'rvf', NULL),
+            (3, 0, 'H430', 1, 'rtf', NULL),
+            (4, 0, 'G1', 1, 'rtf', NULL);
+        INSERT INTO content VALUES
+            (1, '{\\rtf1 Synthetic \\b entry\\b0  {\\field{\\*\\fldinst HYPERLINK \"_STRONG_G1|_NOLINK_\"}{\\fldrslt entry link}} {\\field{\\*\\fldinst HYPERLINK \"tw://bible.*?id=43.3.16|_AUTODETECT_|\"}{\\fldrslt verse link}}\\par}', NULL),
+            (2, 'RVF fixture; deliberately unsupported', NULL),
+            (3, '{\\rtf1 Synthetic Hebrew entry\\par}', NULL),
+            (4, '{\\rtf1 {\\field{\\*\\fldinst HYPERLINK \"tw://person.xyz?id=7\"}{\\fldrslt other link}}\\par}', NULL);",
+    )?;
+    Ok(())
+}
+
 fn create_twm(path: &Path, kind: &str, content_type: &str) -> Result<Connection> {
     let connection = Connection::open(path)?;
     connection.execute_batch("CREATE TABLE config(name TEXT, value TEXT);")?;

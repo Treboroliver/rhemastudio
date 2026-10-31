@@ -38,9 +38,10 @@ Todos assíncronos, retornam `Result<T, ApiError>` serializável. Nomes em `snak
 | `library_list` | — | `Vec<ModuleInfo>` |
 | `resolve_reference` | `text` | `Vec<VerseRange>` ou sugestões |
 | `get_chapter` | `module_id, book, chapter` | `Vec<VerseDto>` (nós já prontos para renderizar) |
-| `get_verse_parallel` | `module_ids[], range` | linhas alinhadas por versículo |
-| `lookup_strong` | `strong_id` | entrada do léxico (ou "não instalado") |
-| `get_commentary` | `module_id, verse` | entradas, da mais específica à mais ampla |
+| `get_chapters` | `module_ids[] (≤ 4), book, chapter` | linhas alinhadas por número de versículo, com nós e erro por coluna |
+| `lookup_strong` | `strong_id` | entrada do léxico (título, `original_word`, nós, módulo de origem); erros `no_lexicon_installed`, `entry_not_found`, `unsupported_format`, `invalid_strong_id` |
+| `get_commentary_index` | `book, chapter, verse` | por comentário ativo, cabeçalhos (escopo, rótulo, tamanho, `supported`), do mais específico ao mais amplo; sem conteúdo |
+| `get_commentary_entry` | `module_id, topic_id, offset` | página de até 60 parágrafos (`nodes`, `has_more`, `next_offset`); erros `unsupported_format` (RVF), `entry_not_found`, `module_protected` |
 | `get_xref_preview` | `range, module_id` | texto curto para o cartão |
 | `search` | `query, scope` | resultados paginados + trechos realçados |
 | `sermon_*` | create/open/save/list/export/delete | modelo de sermão |
