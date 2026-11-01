@@ -11,6 +11,10 @@ use rhema_core::{LinkTarget, Node};
 
 const MAX_STYLES: usize = 4096;
 const MAX_DEPTH: usize = 8;
+const MAX_TAG_BYTES: usize = 4096;
+const MAX_EXTRA_FIELDS: usize = 4;
+/// Fração máxima de caracteres suspeitos aceita numa decodificação UTF-16.
+const MAX_SUSPICIOUS_RATIO: f64 = 0.30;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RvfStats {
@@ -18,6 +22,8 @@ pub struct RvfStats {
     pub text_styles: usize,
     pub utf16_items: usize,
     pub ansi_items: usize,
+    /// Itens que pareciam UTF-16, mas decodificaram em lixo e foram relidos como ANSI.
+    pub utf16_rejected: usize,
     /// Links por tipo (`bíblia`, `interno`, `livro`, `verbete`, `arquivo`, `outro`).
     pub links: BTreeMap<String, usize>,
     /// Construções não reconhecidas, por tipo.
@@ -43,6 +49,7 @@ struct TextStyle {
 struct ItemHeader {
     style: i64,
     paragraph: i64,
+    lines: i64,
     tag: Option<Vec<u8>>,
     end: usize,
 }
@@ -207,23 +214,55 @@ fn classify_link(tag: &[u8]) -> (&'static str, LinkTarget) {
     (kind, LinkTarget::Other(text))
 }
 
+/// Caractere que não deveria aparecer em texto legível dos módulos: substituição, quadrado,
+/// uso privado, CJK/hangul/kana, controles e não atribuídos comuns de decodificação errada.
+pub fn is_suspicious_char(c: char) -> bool {
+    let code = c as u32;
+    matches!(c, '\u{fffd}' | '\u{25a1}')
+        || (c.is_control() && !matches!(c, '\t' | '\n' | '\r'))
+        || (0xe000..=0xf8ff).contains(&code)
+        || (0x3040..=0x30ff).contains(&code)
+        || (0x3400..=0x4dbf).contains(&code)
+        || (0x4e00..=0x9fff).contains(&code)
+        || (0xac00..=0xd7af).contains(&code)
+        || (0xf900..=0xfaff).contains(&code)
+        || (0xd800..=0xdfff).contains(&code)
+}
+
+/// Quantidade de caracteres suspeitos em `text`.
+pub fn suspicious_count(text: &str) -> usize {
+    text.chars().filter(|c| is_suspicious_char(*c)).count()
+}
+
+fn decode_ansi(bytes: &[u8]) -> String {
+    match UTF_8.decode_without_bom_handling_and_without_replacement(bytes) {
+        Some(text) => text.into_owned(),
+        None => WINDOWS_1252
+            .decode_without_bom_handling(bytes)
+            .0
+            .into_owned(),
+    }
+}
+
 fn decode_item_text(bytes: &[u8], unicode_majority: bool, stats: &mut RvfStats) -> String {
     let utf16 = bytes.len() >= 2
         && bytes.len().is_multiple_of(2)
         && (has_odd_zero(bytes) || (unicode_majority && !bytes.contains(&0) && !is_ascii(bytes)));
-    let text = if utf16 {
-        stats.utf16_items += 1;
-        UTF_16LE.decode_without_bom_handling(bytes).0.into_owned()
-    } else {
-        stats.ansi_items += 1;
-        match UTF_8.decode_without_bom_handling_and_without_replacement(bytes) {
-            Some(text) => text.into_owned(),
-            None => WINDOWS_1252
-                .decode_without_bom_handling(bytes)
-                .0
-                .into_owned(),
+    let mut text = None;
+    if utf16 {
+        let decoded = UTF_16LE.decode_without_bom_handling(bytes).0.into_owned();
+        let total = decoded.chars().count().max(1);
+        if (suspicious_count(&decoded) as f64) / (total as f64) > MAX_SUSPICIOUS_RATIO {
+            stats.utf16_rejected += 1;
+        } else {
+            stats.utf16_items += 1;
+            text = Some(decoded);
         }
-    };
+    }
+    let text = text.unwrap_or_else(|| {
+        stats.ansi_items += 1;
+        decode_ansi(bytes)
+    });
     text.chars()
         .filter(|c| !c.is_control() || matches!(c, '\t' | '\n' | '\r'))
         .collect::<String>()
@@ -328,21 +367,54 @@ fn parse_header(input: &[u8], start: usize) -> Option<ItemHeader> {
         cursor += 1;
     }
     let tag = if input.get(cursor) == Some(&b'"') {
-        let relative = memchr::memmem::find(&input[cursor + 1..], b"\"\r\n")?;
-        let tag = input[cursor + 1..cursor + 1 + relative].to_vec();
-        cursor += relative + 4;
+        // Texto entre aspas no estilo Delphi: `""` dentro do texto é uma aspa literal.
+        let mut tag = Vec::new();
+        let mut position = cursor + 1;
+        loop {
+            let byte = *input.get(position)?;
+            if tag.len() > MAX_TAG_BYTES || byte == b'\r' || byte == b'\n' {
+                return None;
+            }
+            position += 1;
+            if byte == b'"' {
+                if input.get(position) == Some(&b'"') {
+                    tag.push(b'"');
+                    position += 1;
+                    continue;
+                }
+                break;
+            }
+            tag.push(byte);
+        }
+        cursor = position;
         Some(tag)
     } else {
         let (_, next) = parse_int(input, cursor)?;
-        if !input[next..].starts_with(b"\r\n") {
-            return None;
-        }
-        cursor = next + 2;
+        cursor = next;
         None
     };
+    // Itens especiais (âncoras, estilo negativo) trazem inteiros extras depois da tag.
+    for _ in 0..MAX_EXTRA_FIELDS {
+        if input.get(cursor) != Some(&b' ') {
+            break;
+        }
+        match parse_int(input, cursor + 1) {
+            Some((_, next)) => cursor = next,
+            // Espaço sobrando antes do CRLF (tabelas `-60`).
+            None => {
+                cursor += 1;
+                break;
+            }
+        }
+    }
+    if !input[cursor..].starts_with(b"\r\n") {
+        return None;
+    }
+    cursor += 2;
     Some(ItemHeader {
         style: values[0],
         paragraph: values[2],
+        lines: values[1],
         tag,
         end: cursor,
     })
@@ -377,10 +449,30 @@ fn scan_items(input: &[u8], body_start: usize) -> Vec<Item<'_>> {
         .enumerate()
         .map(|(index, (_, header))| {
             let stop = starts.get(index + 1).copied().unwrap_or(input.len());
-            let text = trim_terminator(&input[header.end.min(stop)..stop]);
+            let mut body = &input[header.end.min(stop)..stop];
+            // Depois da última linha (`) `) pode vir um blob binário de propriedades de célula.
+            if header.style >= 0 && header.lines > 0 {
+                let mut found = 0;
+                let mut at = 0;
+                while let Some(offset) = find_terminator(&body[at..]) {
+                    found += 1;
+                    at += offset + 2;
+                    if found == header.lines {
+                        if body[at..].starts_with(&[0, 0]) {
+                            body = &body[..at];
+                        }
+                        break;
+                    }
+                }
+            }
+            let text = trim_terminator(body);
             Item { header, text }
         })
         .collect()
+}
+
+fn find_terminator(bytes: &[u8]) -> Option<usize> {
+    bytes.windows(2).position(|pair| pair == b") ")
 }
 
 /// Remove o terminador `) ` (um por item; ocorre repetido em itens vazios) e o `)` final.
@@ -710,6 +802,101 @@ mod tests {
         for cut in 0..blob.len() {
             let _ = parse_text_styles(&blob[..cut]);
         }
+    }
+
+    #[test]
+    fn extra_header_fields_do_not_corrupt_previous_item() {
+        let before = utf16("(I)");
+        let after = utf16("fim");
+        let data = document(&[
+            ("0 1 1 8 0 0", &before),
+            ("-12 0 -1 9 0 0 9", &[][..]),
+            ("0 1 -1 9 0 0", &after),
+        ]);
+        let conversion = convert_rvf(&data);
+        let plain = conversion
+            .nodes
+            .iter()
+            .map(Node::to_plain_text)
+            .collect::<String>();
+        assert!(plain.contains("(I)") && plain.contains("fim"));
+        assert_eq!(suspicious_count(&plain), 0);
+        assert_eq!(conversion.stats.unknown.get("estilo--12"), Some(&1));
+    }
+
+    #[test]
+    fn anchor_headers_with_quoted_tags_are_recognised() {
+        let anchor = b"bkm1";
+        let text = utf16("ok");
+        let data = document(&[
+            ("-2 1 0 0 0 \"subject=a 1\" 1 0", &anchor[..]),
+            ("-2 1 0 0 0 \"\"\"subject=b\"\"\" 1 0", &anchor[..]),
+            ("0 1 -1 9 0 0", &text),
+        ]);
+        let conversion = convert_rvf(&data);
+        assert_eq!(conversion.stats.unknown.get("estilo--2"), Some(&2));
+        assert_eq!(conversion.nodes[0].to_plain_text(), "ok");
+    }
+
+    #[test]
+    fn high_ansi_bytes_are_not_read_as_utf16() {
+        let unicode = utf16("texto");
+        let data = document(&[
+            ("0 1 1 8 0 0", &unicode),
+            ("0 1 -1 9 0 0", &unicode),
+            ("0 1 -1 9 0 0", &[0x6e, 0xe3, 0x6f, 0x21][..]),
+            ("0 1 -1 9 0 0", &[0x63, 0xe7, 0xe3, 0x6f][..]),
+        ]);
+        let conversion = convert_rvf(&data);
+        let plain = conversion
+            .nodes
+            .iter()
+            .map(Node::to_plain_text)
+            .collect::<String>();
+        assert!(plain.contains("não!") && plain.contains("cção"));
+        assert_eq!(conversion.stats.utf16_rejected, 2);
+        assert_eq!(suspicious_count(&plain), 0);
+    }
+
+    #[test]
+    fn legitimate_utf16_greek_and_accents_are_kept() {
+        let greek = utf16("λόγος não");
+        let data = document(&[("0 1 1 8 0 0", &greek)]);
+        let conversion = convert_rvf(&data);
+        assert_eq!(conversion.nodes[0].to_plain_text(), "λόγος não");
+        assert_eq!(conversion.stats.utf16_rejected, 0);
+    }
+
+    #[test]
+    fn cell_property_blob_after_last_line_is_dropped() {
+        let mut text = utf16("cel");
+        text.extend(b") \x00\x00\x02\x01\x02TD\x00\rC.BorderColor");
+        let data = document(&[("0 1 1 8 0 0", &text)]);
+        let conversion = convert_rvf(&data);
+        let plain = conversion
+            .nodes
+            .iter()
+            .map(Node::to_plain_text)
+            .collect::<String>();
+        assert_eq!(plain, "cel");
+    }
+
+    #[test]
+    fn table_header_with_trailing_space_is_recognised() {
+        let text = utf16("ok");
+        let data = document(&[
+            ("-60 3 11 0 2 0 ", &b"\r\n1\r\nTPF0 T.Options"[..]),
+            ("0 1 -1 9 0 0", &text),
+        ]);
+        let conversion = convert_rvf(&data);
+        assert_eq!(conversion.stats.unknown.get("estilo--60"), Some(&1));
+        assert_eq!(conversion.nodes[0].to_plain_text(), "ok");
+    }
+
+    #[test]
+    fn suspicious_detector_flags_cjk_private_use_and_replacement() {
+        assert_eq!(suspicious_count("abc ção λ"), 0);
+        assert_eq!(suspicious_count("a\u{6564}\u{e000}\u{fffd}\u{25a1}"), 4);
     }
 
     proptest::proptest! {

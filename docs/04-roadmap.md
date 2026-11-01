@@ -31,6 +31,7 @@ Marque `[x]` ao concluir. Cada milestone só termina quando **todos** os critér
   - [ ] `.dev.twm` — devocionais (pendente)
   - Concluído: `TwmModule::open` em somente leitura + `query_only`, trava de proteção, config/tipo, comentários com índice em memória e conteúdo sob demanda, lookup/prefixo/índice de palavras de dicionários, isolamento de RVF, CLI truncada e fixtures sintéticas RTF/protegidas.
   - Nota da M1.3b/M1.3c: o Mickelson declara compressão e proteção (`do.encrypt=1`, `secure=1`) e deve ser rejeitado sem ler payload. RVF/BLOBs não são decodificados nesta tarefa.
+- [x] M1.5.1 Correções do RVF — cabeçalhos estendidos, validação UTF-16, blobs de célula; espaço de nota na leitura
 - [x] M1.5 Parser RVF — `rvf.rs`, despacho em `decode_twm_content`, marcador `degraded`, especificação no apêndice; ajuste de espaços RTF (sem mudança necessária) e limpeza do sufixo `<-` em títulos/idiomas
 - [ ] M1.6 Gerador de fixtures sintéticas para cada tipo
 - [ ] M1.7 Testes `proptest` do tokenizador + snapshots `insta`

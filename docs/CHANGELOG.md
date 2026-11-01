@@ -1,5 +1,10 @@
 # Changelog — RhemaStudio
 
+## [M1.5.1] — 2026-11-02
+
+- RVF: cabeçalhos com inteiros extras/tag entre aspas/espaço final (`-12`, `-2`, `-60`) reconhecidos; blob de célula descartado; UTF-16 validado com detector de caracteres suspeitos (fallback Windows-1252). Corrige a G3056 e o VidaNova; 0 entradas suspeitas.
+- UI: espaço extra após nota de rodapé removido do `FootnoteMarker`; teste de regressão `textContent` == `plain_text`.
+
 ## [M1.5] — 2026-11-02
 
 - RTF: medição em 2.000 entradas (NICNT, Holman, Strong_AMG2) confirmou que o conversor não perde espaços reais; os casos "vírgula + letra" são delimitadores de palavra de controle. Teste sintético das estruturas observadas.

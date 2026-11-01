@@ -1041,6 +1041,9 @@ mod tests {
             ("Holman", "Holman-AT.cmt.twm", "bible_refs", "topic_id"),
             ("BEP", "BEP.cmt.twm", "bible_refs", "topic_id"),
         ];
+        let mut dump = std::env::var("RHEMA_RVF_DUMP")
+            .ok()
+            .and_then(|path| std::fs::File::create(path).ok());
         for (label, filename, table, id_column) in modules {
             let path = std::path::Path::new(&root).join(filename);
             let module = TwmModule::open(&path).expect("abrir módulo real");
@@ -1053,6 +1056,7 @@ mod tests {
                 .collect::<Vec<_>>();
             drop(statement);
             let (mut converted, mut degraded, mut good, mut broken, mut empty) = (0, 0, 0, 0, 0);
+            let (mut bad_chars, mut shown) = (0usize, 0usize);
             let mut stats = crate::RvfStats::default();
             let started = std::time::Instant::now();
             for id in &ids {
@@ -1064,6 +1068,7 @@ mod tests {
                 degraded += usize::from(result.degraded);
                 empty += usize::from(result.nodes.is_empty());
                 stats.items += result.stats.items;
+                stats.utf16_rejected += result.stats.utf16_rejected;
                 for (key, value) in result.stats.links {
                     *stats.links.entry(key).or_default() += value;
                 }
@@ -1076,28 +1081,52 @@ mod tests {
                     .map(Node::to_plain_text)
                     .collect::<String>();
                 let chars = plain.chars().collect::<Vec<_>>();
+                if let Some(dump) = dump.as_mut() {
+                    use std::io::Write;
+                    let visible = chars.iter().filter(|c| **c != '\n').count();
+                    let _ = writeln!(dump, "{label},{id},{visible}");
+                }
                 let mojibake = chars
                     .windows(2)
                     .any(|w| w[0] == 'Ã' && "©£³§\u{ad}¡ªº".contains(w[1]));
-                if mojibake || plain.contains('\u{fffd}') {
+                let bad = crate::rvf::suspicious_count(&plain);
+                if mojibake || bad > 0 {
                     broken += 1;
+                    bad_chars += bad;
                     let at = chars
                         .windows(2)
                         .position(|w| w[0] == 'Ã' && "©£³§\u{ad}¡ªº".contains(w[1]))
-                        .or_else(|| chars.iter().position(|c| *c == '\u{fffd}'))
+                        .or_else(|| {
+                            chars
+                                .iter()
+                                .position(|c| crate::rvf::is_suspicious_char(*c))
+                        })
                         .unwrap_or(0);
                     let from = at.saturating_sub(12);
                     let masked = chars[from..(at + 12).min(chars.len())]
                         .iter()
                         .map(|c| {
-                            if c.is_alphabetic() && c.is_ascii() {
+                            if crate::rvf::is_suspicious_char(*c) {
+                                '#'
+                            } else if c.is_alphabetic() {
                                 'x'
                             } else {
                                 *c
                             }
                         })
                         .collect::<String>();
-                    eprintln!("broken id={id} mojibake={mojibake} ctx={masked:?}");
+                    if shown < 5 {
+                        shown += 1;
+                        eprintln!(
+                            "{label} suspicious id={id} chars={bad} mojibake={mojibake} ctx={masked:?} cps={:x?}",
+                            chars
+                                .iter()
+                                .filter(|c| crate::rvf::is_suspicious_char(**c))
+                                .take(8)
+                                .map(|c| *c as u32)
+                                .collect::<Vec<_>>()
+                        );
+                    }
                 } else if plain.chars().any(|c| "áéíóúãõçâêô".contains(c)) {
                     good += 1;
                 }
@@ -1105,9 +1134,10 @@ mod tests {
             let elapsed = started.elapsed();
             let per_entry_us = elapsed.as_micros() / converted.max(1) as u128;
             eprintln!(
-                "{label}: rvf={} converted={converted} degraded={degraded} empty={empty} items={} accents_ok={good} accents_broken={broken} links={:?} unknown={:?} us_per_entry={per_entry_us}",
+                "{label}: rvf={} converted={converted} degraded={degraded} empty={empty} items={} rejected_utf16={} accents_ok={good} suspicious_entries={broken} suspicious_chars={bad_chars} links={:?} unknown={:?} us_per_entry={per_entry_us}",
                 ids.len(),
                 stats.items,
+                stats.utf16_rejected,
                 stats.links,
                 stats.unknown
             );
@@ -1116,17 +1146,54 @@ mod tests {
         let module = TwmModule::open(&path).expect("abrir módulo real");
         let id = module
             .connection
-            .query_row("SELECT id FROM topics WHERE subject = 'G3056'", [], |row| {
-                row.get::<_, i64>(0)
-            })
+            .query_row(
+                "SELECT id FROM topics WHERE subject = 'G3056' AND content_type = 'rvf'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
             .ok();
         let ok = id
             .and_then(|id| module.read_content_bytes(id).ok())
             .map(|raw| {
                 let result = crate::convert_rvf(&raw);
-                (!result.nodes.is_empty(), result.degraded)
+                let plain = result
+                    .nodes
+                    .iter()
+                    .map(Node::to_plain_text)
+                    .collect::<String>();
+                (
+                    !result.nodes.is_empty(),
+                    result.degraded,
+                    crate::rvf::suspicious_count(&plain),
+                )
             });
-        eprintln!("G3056 (nós, degradado): {ok:?}");
+        eprintln!("G3056 (nós, degradado, suspeitos): {ok:?}");
+
+        // Primeira página da maior entrada do VidaNova.
+        let path = std::path::Path::new(&root).join("VidaNova.cmt.twm");
+        let source = CommentarySource::open(&path).expect("abrir VidaNova");
+        let module = TwmModule::open(&path).expect("abrir módulo real");
+        let biggest = module
+            .connection
+            .query_row(
+                "SELECT topic_id, length(CAST(data AS BLOB)) FROM content ORDER BY 2 DESC LIMIT 1",
+                [],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .expect("maior entrada");
+        for label in ["frio", "morno"] {
+            let started = std::time::Instant::now();
+            let page = source
+                .entry_page(biggest.0, 0, 60, 8_000)
+                .expect("primeira página");
+            eprintln!(
+                "VidaNova maior entrada ({} KB) primeira página {label}: {:.1} ms nós={} has_more={}",
+                biggest.1 / 1024,
+                started.elapsed().as_secs_f64() * 1000.0,
+                page.nodes.len(),
+                page.has_more
+            );
+        }
     }
 
     #[test]

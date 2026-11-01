@@ -1,7 +1,9 @@
-# Contexto — M1.5
+# Contexto — M1.5.1
 
-Atualizado em 2026-11-02. M1.5 concluído (RTF medido, parser RVF, título `<-`); M4b continua fora do escopo.
+Atualizado em 2026-11-02. M1.5.1 concluído (correções do RVF e espaço de nota na leitura); M4b continua fora do escopo.
 
+- RVF: cabeçalhos com campos extras, tag entre aspas e espaço final agora são reconhecidos; blobs de célula/tabela descartados; UTF-16 validado (>30% suspeitos → Windows-1252). 0 entradas suspeitas nos 4 módulos. Links: só `tw://bible` é de versículo; marcadores `-9 … 3/4` são estruturais.
+- UI: `FootnoteMarker` não gera mais espaço ao redor da nota (`textContent` == `plain_text`, teste `node-spacing.test.ts`).
 - RVF: `rvf.rs` converte as entradas de VidaNova (110), Strong_AMG2 (32, incl. G3056), BEP (1.181) para `Vec<Node>`; Holman tem 1 entrada RVF com dados NULL. Estrutura estranha vira `degraded` (aviso discreto na interface), nunca erro. Especificação em `docs/02-apendice-schemas.md`.
 - RTF/espaços: a medição (2.000 entradas) mostrou que o conversor não descarta espaços reais; o "espaço perdido" é o delimitador após palavra de controle (RTF). Sem alteração no conversor.
 - Biblioteca: valores de propriedade têm espaços e o sufixo ` <-` removidos (o marcador está no arquivo da BJ, em `lang` e `description`); `CATALOG_VERSION` = 5.

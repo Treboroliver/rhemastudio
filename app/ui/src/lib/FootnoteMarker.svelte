@@ -24,8 +24,7 @@
   }
 </script>
 
-<span class="note-wrap">
-  <button
+<span class="note-wrap"><button
     type="button"
     class="note-marker"
     aria-label={t('footnote')}
@@ -36,8 +35,6 @@
     onblur={() => (open = false)}
     {onkeydown}
     {onclick}
-  >†</button>
-  {#if open}
+  >†</button>{#if open}
     <span class="note-popup" role="tooltip" id={popupId} tabindex="-1">{@render children()}</span>
-  {/if}
-</span>
+  {/if}</span>
