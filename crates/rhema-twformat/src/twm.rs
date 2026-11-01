@@ -931,16 +931,47 @@ mod tests {
         let Ok(root) = std::env::var("RHEMA_TEST_MODULES") else {
             return;
         };
-        let mask = |bytes: &[u8]| {
-            bytes
-                .iter()
-                .map(|b| match b {
-                    b'a'..=b'z' | b'A'..=b'Z' => 'x',
-                    b'0'..=b'9' => '9',
-                    32..=126 => *b as char,
-                    _ => '?',
-                })
-                .collect::<String>()
+        // Vírgula seguida de letra no RTF bruto: direto, ou só após palavras de controle
+        // (o único espaço depois de uma palavra de controle é delimitador, não conteúdo).
+        let raw_counts = |raw: &[u8]| {
+            let (mut direct, mut delimited) = (0usize, 0usize);
+            for (i, byte) in raw.iter().enumerate() {
+                if *byte != b',' {
+                    continue;
+                }
+                let mut j = i + 1;
+                let mut skipped = false;
+                while j < raw.len() {
+                    match raw[j] {
+                        b'{' | b'}' => j += 1,
+                        b'\\' if raw.get(j + 1).is_some_and(u8::is_ascii_alphabetic) => {
+                            j += 1;
+                            while raw.get(j).is_some_and(u8::is_ascii_alphabetic) {
+                                j += 1;
+                            }
+                            if raw.get(j) == Some(&b'-') {
+                                j += 1;
+                            }
+                            while raw.get(j).is_some_and(u8::is_ascii_digit) {
+                                j += 1;
+                            }
+                            if raw.get(j) == Some(&b' ') {
+                                j += 1;
+                            }
+                        }
+                        _ => break,
+                    }
+                    skipped = true;
+                }
+                if raw.get(j).is_some_and(u8::is_ascii_alphabetic) {
+                    if skipped {
+                        delimited += 1;
+                    } else {
+                        direct += 1;
+                    }
+                }
+            }
+            (direct, delimited)
         };
         for filename in ["Holman-AT.cmt.twm", "NICNT.cmt.twm", "Strong_AMG2.dct.twm"] {
             let path = std::path::Path::new(&root).join(filename);
@@ -956,8 +987,8 @@ mod tests {
                 .collect::<Vec<_>>();
             drop(statement);
             let step = (ids.len() / 2000).max(1);
-            let (mut entries, mut hits, mut shown) = (0usize, 0usize, 0usize);
-            let mut patterns = std::collections::BTreeSet::new();
+            let (mut entries, mut hits) = (0usize, 0usize);
+            let (mut raw_direct, mut raw_delimited) = (0usize, 0usize);
             for id in ids.iter().step_by(step).take(2000) {
                 let Ok(raw) = module.read_content_bytes(*id) else {
                     continue;
@@ -973,26 +1004,13 @@ mod tests {
                     .filter(|w| w[0] == ',' && w[1].is_alphabetic())
                     .count();
                 hits += found;
-                if found > 0 && shown < 6 {
-                    for (i, byte) in raw.iter().enumerate() {
-                        if *byte == b','
-                            && raw.get(i + 1).is_some_and(|n| *n != b' ')
-                            && raw[i + 1..(i + 9).min(raw.len())]
-                                .iter()
-                                .any(|n| matches!(n, b'\\' | b'{' | b'}'))
-                            && patterns
-                                .insert(mask(&raw[i.saturating_sub(10)..(i + 40).min(raw.len())]))
-                        {
-                            shown += 1;
-                            break;
-                        }
-                    }
-                }
+                let (direct, delimited) = raw_counts(&raw);
+                raw_direct += direct;
+                raw_delimited += delimited;
             }
-            eprintln!("{filename}: entries={entries} comma_letter={hits}");
-            for pattern in patterns.iter().take(6) {
-                eprintln!("  ctx: {}", pattern.chars().take(60).collect::<String>());
-            }
+            eprintln!(
+                "{filename}: entries={entries} raw_direct={raw_direct} raw_via_controls={raw_delimited} converted={hits}"
+            );
         }
     }
 

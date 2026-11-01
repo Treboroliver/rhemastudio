@@ -1007,6 +1007,22 @@ mod tests {
     }
 
     #[test]
+    fn delimiter_rule_holds_for_observed_structures() {
+        let cases: [(&[u8], &str); 6] = [
+            (br"{\rtf1 A,\plain \f1\i\fs18\cf1 B}", "A,B"),
+            (br"{\rtf1 A, \plain \f1\i\fs18\cf1 B}", "A, B"),
+            (br"{\rtf1 A,\plain \f1\fs24  \plain \f1\cf1 B}", "A, B"),
+            (br"{\rtf1 A,\rdblquote  B}", "A,\u{201d} B"),
+            (br"{\rtf1 A,{\b B} {\i C}}", "A,B C"),
+            (br"{\rtf1 A,\u233 e B\u8217 ? C}", "A,é B\u{2019} C"),
+        ];
+        for (input, expected) in cases {
+            let nodes = convert_rtf(input).expect("estrutura sintética");
+            assert_eq!(plain_text(&nodes), expected);
+        }
+    }
+
+    #[test]
     fn character_limit_splits_a_giant_paragraph_without_loss() {
         let rtf =
             br"{\rtf1 Alpha beta gamma delta {\b epsilon zeta} eta theta iota kappa\par Next one}";
