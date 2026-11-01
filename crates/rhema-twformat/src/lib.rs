@@ -5,7 +5,7 @@ pub mod protection;
 pub mod rtf;
 pub mod twm;
 
-pub use bible_reader::{BibleScope, OntReader};
+pub use bible_reader::{should_use_utf8_for_windows_1252, BibleScope, OntReader, Utf8VerseProbe};
 pub use detect::{detect_signature, ModuleSignature, SQLITE_MAGIC, TW_ENCRYPTED_MAGIC};
 pub use markup::{plain_text, tokenize_markup};
 pub use protection::ensure_twm_unprotected;
@@ -217,12 +217,62 @@ mod tests {
     #[test]
     fn test_synthetic_windows_1252_accented_verse() {
         let mut temp = NamedTempFile::new().unwrap();
-        temp.write_all(b"Jo 3:16: a\xe7\xe3o, caf\xe9, p\xf5e\r\n\r\ncharset=0\r\n")
-            .unwrap();
+        let (encoded, _, _) = encoding_rs::WINDOWS_1252.encode(
+            "Linha sintética com ação, café e põe\r\n\r\ncharset=0\r\ntitle=Bíblia legítima\r\ndescription=Descrição em Windows-1252\r\n",
+        );
+        temp.write_all(&encoded).unwrap();
 
         let reader = OntReader::open(temp.path()).unwrap();
 
         assert_eq!(reader.encoding_name(), "windows-1252");
-        assert_eq!(reader.line_by_index(0).unwrap(), "Jo 3:16: ação, café, põe");
+        assert_eq!(
+            reader.line_by_index(0).unwrap(),
+            "Linha sintética com ação, café e põe"
+        );
+        assert_eq!(
+            reader.properties().get("title").map(String::as_str),
+            Some("Bíblia legítima")
+        );
+        assert_eq!(
+            reader.properties().get("description").map(String::as_str),
+            Some("Descrição em Windows-1252")
+        );
+    }
+
+    #[test]
+    fn test_utf8_verses_override_declared_windows_1252_for_properties_too() {
+        let mut temp = NamedTempFile::new().unwrap();
+        let verses = "á".repeat(20);
+        let module = format!(
+            "Linha sintética {verses}\r\n\r\ncharset=1252\r\ntitle=Bíblia sintética\r\ndescription=Descrição UTF-8\r\n"
+        );
+        temp.write_all(module.as_bytes()).unwrap();
+
+        let reader = OntReader::open(temp.path()).unwrap();
+
+        assert_eq!(reader.encoding_name(), "UTF-8");
+        assert_eq!(
+            reader.line_by_index(0).unwrap(),
+            format!("Linha sintética {verses}")
+        );
+        assert_eq!(
+            reader.properties().get("title").map(String::as_str),
+            Some("Bíblia sintética")
+        );
+        assert_eq!(
+            reader.properties().get("description").map(String::as_str),
+            Some("Descrição UTF-8")
+        );
+    }
+
+    #[test]
+    fn utf8_probe_counts_sequences_split_across_chunks() {
+        let bytes = format!("{}{}", "a".repeat(65_535), "á".repeat(20)).into_bytes();
+        let mut probe = Utf8VerseProbe::new();
+
+        probe.observe_bytes(&bytes[..65_536]);
+        probe.observe_bytes(&bytes[65_536..]);
+
+        assert!(probe.qualifies());
     }
 }

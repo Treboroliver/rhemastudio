@@ -11,6 +11,66 @@ use rhema_core::{
 use crate::detect::detect_signature;
 use crate::markup::tokenize_markup;
 
+const UTF8_OVERRIDE_MIN_TWO_BYTE_SEQUENCES: usize = 20;
+
+pub struct Utf8VerseProbe {
+    all_valid: bool,
+    two_byte_sequences: usize,
+    trailing_bytes: Vec<u8>,
+}
+
+impl Utf8VerseProbe {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn observe_bytes(&mut self, bytes: &[u8]) {
+        if !self.all_valid {
+            return;
+        }
+        let mut combined = std::mem::take(&mut self.trailing_bytes);
+        combined.extend_from_slice(bytes);
+        let valid_len = match std::str::from_utf8(&combined) {
+            Ok(_) => combined.len(),
+            Err(error) if error.error_len().is_none() => error.valid_up_to(),
+            Err(_) => {
+                self.all_valid = false;
+                return;
+            }
+        };
+        self.two_byte_sequences = self.two_byte_sequences.saturating_add(
+            combined[..valid_len]
+                .windows(2)
+                .filter(|pair| (0xC2..=0xDF).contains(&pair[0]) && (0x80..=0xBF).contains(&pair[1]))
+                .count(),
+        );
+        self.trailing_bytes
+            .extend_from_slice(&combined[valid_len..]);
+    }
+
+    pub fn qualifies(&self) -> bool {
+        self.all_valid
+            && self.trailing_bytes.is_empty()
+            && self.two_byte_sequences >= UTF8_OVERRIDE_MIN_TWO_BYTE_SEQUENCES
+    }
+}
+
+impl Default for Utf8VerseProbe {
+    fn default() -> Self {
+        Self {
+            all_valid: true,
+            two_byte_sequences: 0,
+            trailing_bytes: Vec::new(),
+        }
+    }
+}
+
+pub fn should_use_utf8_for_windows_1252(verse_bytes: &[u8]) -> bool {
+    let mut probe = Utf8VerseProbe::new();
+    probe.observe_bytes(verse_bytes);
+    probe.qualifies()
+}
+
 /// Escopo do texto bíblico contido no módulo
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BibleScope {
@@ -155,7 +215,13 @@ impl OntReader {
 
         // 4. Detecção de Codificação a partir da propriedade charset (ou fallback)
         let raw_props_map = parse_raw_ascii_properties(bytes, prop_lines);
-        let encoding = resolve_encoding(&raw_props_map, bytes);
+        let verse_bytes_end = verse_offsets.last().map_or(0, |(_, end)| *end);
+        let encoding = resolve_encoding(
+            &raw_props_map,
+            bytes,
+            &bytes[..verse_bytes_end],
+            &path.display().to_string(),
+        );
 
         // 5. Decodificação Completa das Propriedades
         let properties = decode_properties(bytes, prop_lines, encoding);
@@ -457,11 +523,23 @@ fn parse_raw_ascii_properties(
 fn resolve_encoding(
     props: &HashMap<String, String>,
     bytes: &[u8],
+    verse_bytes: &[u8],
+    module_name: &str,
 ) -> &'static encoding_rs::Encoding {
     if let Some(charset_str) = props.get("charset") {
         let charset = charset_str.trim().to_ascii_lowercase();
         match charset.as_str() {
-            "0" | "1252" => return encoding_rs::WINDOWS_1252,
+            "0" | "1252" => {
+                if should_use_utf8_for_windows_1252(verse_bytes) {
+                    tracing::warn!(
+                        module = module_name,
+                        charset = %charset,
+                        "Versículos UTF-8 detectados apesar do charset declarado; usando UTF-8"
+                    );
+                    return encoding_rs::UTF_8;
+                }
+                return encoding_rs::WINDOWS_1252;
+            }
             "65001" | "utf-8" | "utf8" => return encoding_rs::UTF_8,
             "1250" => return encoding_rs::WINDOWS_1250,
             "1251" => return encoding_rs::WINDOWS_1251,

@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use encoding_rs::{UTF_8, WINDOWS_1252};
 use rhema_core::{ModuleError, ModuleKind};
+use rhema_twformat::Utf8VerseProbe;
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -68,7 +69,7 @@ pub struct Library {
 
 /// Versão do formato e das regras de metadados gravadas no catalog.json.
 /// Qualquer alteração em como títulos ou metadados são calculados exige incrementar este valor.
-pub const CATALOG_VERSION: u32 = 3;
+pub const CATALOG_VERSION: u32 = 4;
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 struct FolderCatalog {
@@ -374,7 +375,7 @@ fn classify_bible(path: &Path, identity: &FileIdentity) -> ModuleInfo {
         return failed_module(path, identity.size, "Assinatura de texto inválida");
     }
 
-    match read_bible_metadata(&mut file, identity.size) {
+    match read_bible_metadata(&mut file, identity.size, path) {
         Ok(metadata) => module_info(
             path,
             identity,
@@ -386,11 +387,12 @@ fn classify_bible(path: &Path, identity: &FileIdentity) -> ModuleInfo {
     }
 }
 
-fn read_bible_metadata(file: &mut File, size: u64) -> Result<Metadata, String> {
+fn read_bible_metadata(file: &mut File, size: u64, path: &Path) -> Result<Metadata, String> {
     let mut cursor = size;
     let mut scanned = 0_u64;
     let mut properties = Vec::new();
     let mut skipped_footer_lines = 0;
+    let mut verse_end = None;
     while cursor > 0 && scanned < BIBLE_PROPERTIES_MAX_BYTES {
         let Some((line_start, line_end)) = read_previous_line_range(file, &mut cursor)? else {
             break;
@@ -408,6 +410,7 @@ fn read_bible_metadata(file: &mut File, size: u64) -> Result<Metadata, String> {
                 skipped_footer_lines += 1;
                 continue;
             }
+            verse_end = Some(line_end);
             break;
         };
         let key = trim_ascii(&line[..separator]);
@@ -422,6 +425,7 @@ fn read_bible_metadata(file: &mut File, size: u64) -> Result<Metadata, String> {
                 skipped_footer_lines += 1;
                 continue;
             }
+            verse_end = Some(line_end);
             break;
         }
         let key = key.to_ascii_lowercase();
@@ -444,13 +448,25 @@ fn read_bible_metadata(file: &mut File, size: u64) -> Result<Metadata, String> {
         .iter()
         .find_map(|(key, value)| (key.as_slice() == b"charset").then_some(value.as_slice()))
         .map(<[u8]>::to_vec);
+    let utf8_override = matches!(charset.as_deref(), Some(b"0" | b"1252"))
+        && verse_end
+            .map(|end| probe_verse_prefix(file, end))
+            .transpose()?
+            .unwrap_or(false);
+    if utf8_override {
+        tracing::warn!(
+            module = %path.display(),
+            charset = %String::from_utf8_lossy(charset.as_deref().unwrap_or_default()),
+            "Versículos UTF-8 detectados apesar do charset declarado; usando UTF-8"
+        );
+    }
     let mut props = HashMap::new();
     for (raw_key, value_bytes) in properties.into_iter().rev() {
         let key = String::from_utf8_lossy(&raw_key).to_ascii_lowercase();
         if !is_metadata_key(&key) {
             continue;
         }
-        let value = decode_metadata_value(&value_bytes, charset.as_deref());
+        let value = decode_metadata_value(&value_bytes, charset.as_deref(), utf8_override);
         props.insert(key, value);
     }
     let short_title = props.get("short.title").cloned();
@@ -483,16 +499,37 @@ fn is_trailing_nonproperty(line: &[u8]) -> bool {
         .is_some_and(|byte| *byte == b'<' || *byte == b'#' || byte.is_ascii_whitespace())
 }
 
-fn decode_metadata_value(bytes: &[u8], charset: Option<&[u8]>) -> String {
-    let decoded = match charset {
-        Some(b"65001") => UTF_8.decode(bytes).0.into_owned(),
-        Some(b"0") => WINDOWS_1252.decode(bytes).0.into_owned(),
-        _ => match std::str::from_utf8(bytes) {
-            Ok(value) => value.to_owned(),
-            Err(_) => WINDOWS_1252.decode(bytes).0.into_owned(),
-        },
+fn decode_metadata_value(bytes: &[u8], charset: Option<&[u8]>, utf8_override: bool) -> String {
+    let decoded = if utf8_override {
+        UTF_8.decode(bytes).0.into_owned()
+    } else {
+        match charset {
+            Some(b"65001") => UTF_8.decode(bytes).0.into_owned(),
+            Some(b"0") => WINDOWS_1252.decode(bytes).0.into_owned(),
+            _ => match std::str::from_utf8(bytes) {
+                Ok(value) => value.to_owned(),
+                Err(_) => WINDOWS_1252.decode(bytes).0.into_owned(),
+            },
+        }
     };
     decoded.chars().take(METADATA_VALUE_MAX_CHARS).collect()
+}
+
+fn probe_verse_prefix(file: &mut File, end: u64) -> Result<bool, String> {
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| error.to_string())?;
+    let mut reader = file.take(end);
+    let mut probe = Utf8VerseProbe::new();
+    let mut buffer = [0; 64 * 1024];
+    loop {
+        let bytes_read = reader
+            .read(&mut buffer)
+            .map_err(|error| error.to_string())?;
+        if bytes_read == 0 {
+            return Ok(probe.qualifies());
+        }
+        probe.observe_bytes(&buffer[..bytes_read]);
+    }
 }
 
 fn read_previous_line_range(
@@ -1013,6 +1050,33 @@ mod tests {
         assert!(scan.modules.iter().any(|module| {
             module.title == "Bíblia com UTF-8" && module.abbreviation.as_deref() == Some("UTF")
         }));
+    }
+
+    #[test]
+    fn reads_utf8_bible_metadata_despite_declared_windows_charset() {
+        let temp = tempdir().expect("tempdir");
+        let modules = temp.path().join("modules");
+        fs::create_dir(&modules).expect("module dir");
+        let path = modules.join("utf8-1252.ont");
+        fs::write(
+            &path,
+            format!(
+                "Linha sintética {}\r\n\r\ndescription = Bíblia sintética\r\nshort.title = TST\r\ncharset = 1252\r\n",
+                "á".repeat(20)
+            ),
+        )
+        .expect("write module");
+
+        let scan = library(temp.path()).scan(&[modules], |_| {}).expect("scan");
+        let module = scan
+            .modules
+            .iter()
+            .find(|module| module.path == path)
+            .expect("UTF-8 module");
+
+        assert_eq!(module.title, "Bíblia sintética");
+        assert_eq!(module.description.as_deref(), Some("Bíblia sintética"));
+        assert_eq!(module.abbreviation.as_deref(), Some("TST"));
     }
 
     #[test]
