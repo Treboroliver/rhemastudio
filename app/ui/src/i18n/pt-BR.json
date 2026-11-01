@@ -120,6 +120,7 @@
   "commentaryError": "Não foi possível carregar os comentários.",
   "commentaryModuleError": "Este módulo não pôde ser lido.",
   "commentaryUnsupported": "Formato ainda não suportado.",
+  "contentDegraded": "Parte da formatação deste texto não pôde ser exibida.",
   "commentaryMore": "Mostrar mais",
   "commentaryModules": "Comentários ativos",
   "unknownLinkHint": "Link de tipo não suportado ({type})",

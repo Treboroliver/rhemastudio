@@ -94,6 +94,8 @@ pub struct RtfPage {
     pub has_more: bool,
     /// Cursor da próxima página (ver [`page_cursor`]).
     pub next_offset: u64,
+    /// Estrutura não reconhecida por completo (RVF): texto em melhor esforço.
+    pub degraded: bool,
 }
 
 /// Codifica uma posição: parágrafo e caractere dentro dele.
@@ -205,6 +207,7 @@ pub fn convert_rtf_page(
         has_more,
         next_offset: next
             .unwrap_or_else(|| page_cursor(start.saturating_add(max_paragraphs.max(1)), 0)),
+        degraded: false,
     })
 }
 
@@ -724,9 +727,73 @@ fn encoding_for_codepage(codepage: u16) -> Option<&'static Encoding> {
 }
 
 pub fn decode_twm_content(content_type: &str, input: &[u8]) -> Result<Vec<Node>, ModuleError> {
+    decode_twm_content_checked(content_type, input).map(|decoded| decoded.nodes)
+}
+
+/// Conteúdo convertido; `degraded` indica melhor esforço (estrutura RVF não reconhecida).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecodedContent {
+    pub nodes: Vec<Node>,
+    pub degraded: bool,
+}
+
+pub fn decode_twm_content_checked(
+    content_type: &str,
+    input: &[u8],
+) -> Result<DecodedContent, ModuleError> {
     match content_type {
-        "rtf" => convert_rtf(input),
+        "rtf" => convert_rtf(input).map(|nodes| DecodedContent {
+            nodes,
+            degraded: false,
+        }),
+        "rvf" => {
+            let conversion = crate::rvf::convert_rvf(input);
+            Ok(DecodedContent {
+                nodes: conversion.nodes,
+                degraded: conversion.degraded,
+            })
+        }
         other => Err(ModuleError::UnsupportedContent(other.to_string())),
+    }
+}
+
+/// Pagina nós já convertidos (RVF) por parágrafos de nível superior.
+fn page_nodes(nodes: Vec<Node>, offset: u64, max_paragraphs: usize, max_chars: usize) -> RtfPage {
+    let (start, _) = split_cursor(offset);
+    let max_paragraphs = max_paragraphs.max(1);
+    let mut paragraphs: Vec<Vec<Node>> = vec![Vec::new()];
+    for node in nodes {
+        if matches!(node, Node::Paragraph) {
+            paragraphs.push(Vec::new());
+        } else if let Some(last) = paragraphs.last_mut() {
+            last.push(node);
+        }
+    }
+    let total = paragraphs.len();
+    let mut page = Vec::new();
+    let mut chars = 0usize;
+    let mut index = start;
+    while index < total && index - start < max_paragraphs {
+        let paragraph = std::mem::take(&mut paragraphs[index]);
+        let size = paragraph
+            .iter()
+            .map(|node| node.to_plain_text().chars().count())
+            .sum::<usize>();
+        if index > start && chars + size > max_chars.max(1) {
+            break;
+        }
+        if index > start {
+            page.push(Node::Paragraph);
+        }
+        chars += size;
+        page.extend(paragraph);
+        index += 1;
+    }
+    RtfPage {
+        nodes: page,
+        has_more: index < total,
+        next_offset: page_cursor(index, 0),
+        degraded: false,
     }
 }
 
@@ -740,11 +807,18 @@ pub fn decode_twm_content_page(
 ) -> Result<RtfPage, ModuleError> {
     match content_type {
         "rtf" => convert_rtf_page(input, offset, max_paragraphs, max_chars),
+        "rvf" => {
+            let conversion = crate::rvf::convert_rvf(input);
+            let degraded = conversion.degraded;
+            let mut page = page_nodes(conversion.nodes, offset, max_paragraphs, max_chars);
+            page.degraded = degraded;
+            Ok(page)
+        }
         other => Err(ModuleError::UnsupportedContent(other.to_string())),
     }
 }
 
-fn parse_link_target(instruction: &str) -> LinkTarget {
+pub(crate) fn parse_link_target(instruction: &str) -> LinkTarget {
     let target = instruction
         .split_once("HYPERLINK")
         .map(|(_, value)| value.trim())
@@ -1104,9 +1178,11 @@ mod tests {
     #[test]
     fn dispatches_page_conversion_by_declared_type() {
         assert!(decode_twm_content_page("rtf", br"{\rtf1 a\par b}", 0, 1, 100).is_ok());
+        let rvf = decode_twm_content_page("rvf", b"x", 0, 1, 100).expect("RVF degradado");
+        assert!(rvf.degraded);
         assert!(matches!(
-            decode_twm_content_page("rvf", b"x", 0, 1, 100),
-            Err(ModuleError::UnsupportedContent(kind)) if kind == "rvf"
+            decode_twm_content_page("custom", b"x", 0, 1, 100),
+            Err(ModuleError::UnsupportedContent(kind)) if kind == "custom"
         ));
     }
 
@@ -1114,10 +1190,9 @@ mod tests {
     fn dispatches_twm_content_by_declared_type() {
         let nodes = decode_twm_content("rtf", br"{\rtf1 decoded}").expect("RTF suportado");
         assert_eq!(plain_text(&nodes), "decoded");
-        assert!(matches!(
-            decode_twm_content("rvf", b"not decoded"),
-            Err(ModuleError::UnsupportedContent(kind)) if kind == "rvf"
-        ));
+        let rvf = decode_twm_content_checked("rvf", b"not decoded").expect("RVF degradado");
+        assert!(rvf.degraded);
+        assert_eq!(plain_text(&rvf.nodes), "not decoded");
         assert!(matches!(
             decode_twm_content("custom", b"not decoded"),
             Err(ModuleError::UnsupportedContent(kind)) if kind == "custom"

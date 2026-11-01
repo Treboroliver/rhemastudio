@@ -113,13 +113,13 @@ impl TwmModule {
         &self,
         topic_id: i64,
         row_type: Option<&str>,
-    ) -> Result<Vec<Node>, ModuleError> {
+    ) -> Result<crate::DecodedContent, ModuleError> {
         let content_type = self.content_type(row_type);
-        if content_type != "rtf" {
+        if content_type != "rtf" && content_type != "rvf" {
             return Err(ModuleError::UnsupportedContent(content_type));
         }
         let bytes = self.read_content_bytes(topic_id)?;
-        crate::decode_twm_content(&content_type, &bytes)
+        crate::decode_twm_content_checked(&content_type, &bytes)
     }
 
     fn decode_content_page(
@@ -131,7 +131,7 @@ impl TwmModule {
         max_chars: usize,
     ) -> Result<RtfPage, ModuleError> {
         let content_type = self.content_type(row_type);
-        if content_type != "rtf" {
+        if content_type != "rtf" && content_type != "rvf" {
             return Err(ModuleError::UnsupportedContent(content_type));
         }
         let bytes = self.read_content_bytes(topic_id)?;
@@ -238,6 +238,8 @@ pub struct CommentaryEntry {
     pub tvi: u16,
     pub scope: CommentaryScope,
     pub content: Result<Vec<Node>, ModuleError>,
+    /// Conteúdo RVF em melhor esforço; a interface mostra um aviso discreto.
+    pub degraded: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -261,7 +263,7 @@ pub struct CommentaryHeader {
     pub scope: CommentaryScope,
     /// Tipo efetivo do conteúdo (`rtf`, `rvf`, ...).
     pub content_type: String,
-    /// Falso quando o formato ainda não tem conversor (por exemplo, RVF).
+    /// Falso quando o formato não tem conversor.
     pub supported: bool,
     pub size_bytes: Option<u64>,
 }
@@ -339,16 +341,20 @@ impl CommentarySource {
         Ok(self
             .matching(verse)?
             .into_iter()
-            .map(|entry| CommentaryEntry {
-                topic_id: entry.topic_id,
-                bi: entry.book.number(),
-                ci: entry.chapter,
-                fvi: entry.from_verse,
-                tvi: entry.to_verse,
-                scope: scope_for(entry),
-                content: self
+            .map(|entry| {
+                let decoded = self
                     .module
-                    .decode_content(entry.topic_id, entry.content_type.as_deref()),
+                    .decode_content(entry.topic_id, entry.content_type.as_deref());
+                CommentaryEntry {
+                    topic_id: entry.topic_id,
+                    bi: entry.book.number(),
+                    ci: entry.chapter,
+                    fvi: entry.from_verse,
+                    tvi: entry.to_verse,
+                    scope: scope_for(entry),
+                    degraded: decoded.as_ref().is_ok_and(|decoded| decoded.degraded),
+                    content: decoded.map(|decoded| decoded.nodes),
+                }
             })
             .collect())
     }
@@ -367,7 +373,7 @@ impl CommentarySource {
                     fvi: entry.from_verse,
                     tvi: entry.to_verse,
                     scope: scope_for(entry),
-                    supported: content_type == "rtf",
+                    supported: matches!(content_type.as_str(), "rtf" | "rvf"),
                     content_type,
                     size_bytes: self.module.content_size(entry.topic_id)?,
                 })
@@ -404,6 +410,8 @@ pub struct DictionaryEntry {
     pub subject: String,
     pub strong_orig_word: Option<String>,
     pub content: Result<Vec<Node>, ModuleError>,
+    /// Conteúdo RVF em melhor esforço; a interface mostra um aviso discreto.
+    pub degraded: bool,
 }
 
 #[derive(Debug)]
@@ -517,13 +525,15 @@ impl DictionarySource {
     }
 
     fn load_entry(&self, entry: DictionaryRef) -> Result<DictionaryEntry, ModuleError> {
+        let decoded = self
+            .module
+            .decode_content(entry.topic_id, entry.content_type.as_deref());
         Ok(DictionaryEntry {
             topic_id: entry.topic_id,
             subject: entry.subject,
             strong_orig_word: entry.strong_orig_word,
-            content: self
-                .module
-                .decode_content(entry.topic_id, entry.content_type.as_deref()),
+            degraded: decoded.as_ref().is_ok_and(|decoded| decoded.degraded),
+            content: decoded.map(|decoded| decoded.nodes),
         })
     }
 }
@@ -769,12 +779,17 @@ mod tests {
         let unsupported = source
             .entries_for(VerseRef::new(Book::John, 3, 17))
             .expect("consultar entrada RVF sem falhar a consulta");
+        let rvf = unsupported
+            .iter()
+            .filter(|entry| entry.content.is_ok() && entry.degraded)
+            .count();
         let errors = unsupported
             .iter()
             .filter(|entry| matches!(entry.content, Err(ModuleError::UnsupportedContent(_))))
             .count();
         assert_eq!(unsupported.len(), 4);
-        assert_eq!(errors, 1);
+        assert_eq!(errors, 0);
+        assert_eq!(rvf, 1);
     }
 
     #[test]
@@ -821,10 +836,8 @@ mod tests {
             .lookup("G26")
             .expect("buscar entrada RVF")
             .expect("G26 existe");
-        assert!(matches!(
-            rvf.content,
-            Err(ModuleError::UnsupportedContent(ref kind)) if kind == "rvf"
-        ));
+        assert!(rvf.content.is_ok());
+        assert!(rvf.degraded);
     }
 
     #[test]
@@ -863,7 +876,7 @@ mod tests {
             .filter(|header| !header.supported)
             .map(|header| (header.topic_id, header.content_type.as_str()))
             .collect::<Vec<_>>();
-        assert_eq!(unsupported, [(50, "rvf")]);
+        assert!(unsupported.is_empty());
 
         let first = source
             .entry_page(40, 0, 60, 8_000)
@@ -886,10 +899,12 @@ mod tests {
         assert_eq!(paragraphs(&third), 30);
         assert!(second.has_more && !third.has_more);
 
-        assert!(matches!(
-            source.entry_page(50, 0, 60, 8_000),
-            Err(ModuleError::UnsupportedContent(kind)) if kind == "rvf"
-        ));
+        assert!(
+            source
+                .entry_page(50, 0, 60, 8_000)
+                .expect("RVF degradado")
+                .degraded
+        );
         assert!(matches!(
             source.entry_page(999, 0, 60, 8_000),
             Err(ModuleError::NotFound(_))
@@ -1012,6 +1027,106 @@ mod tests {
                 "{filename}: entries={entries} raw_direct={raw_direct} raw_via_controls={raw_delimited} converted={hits}"
             );
         }
+    }
+
+    /// Diagnóstico RVF somente com números: entradas, degradadas, construções, acentos, links e tempo.
+    #[test]
+    fn real_rvf_diagnostic() {
+        let Ok(root) = std::env::var("RHEMA_TEST_MODULES") else {
+            return;
+        };
+        let modules = [
+            ("VidaNova", "VidaNova.cmt.twm", "bible_refs", "topic_id"),
+            ("Strong_AMG2", "Strong_AMG2.dct.twm", "topics", "id"),
+            ("Holman", "Holman-AT.cmt.twm", "bible_refs", "topic_id"),
+            ("BEP", "BEP.cmt.twm", "bible_refs", "topic_id"),
+        ];
+        for (label, filename, table, id_column) in modules {
+            let path = std::path::Path::new(&root).join(filename);
+            let module = TwmModule::open(&path).expect("abrir módulo real");
+            let sql = format!("SELECT {id_column} FROM {table} WHERE content_type = 'rvf'");
+            let mut statement = module.connection.prepare(&sql).expect("ids");
+            let ids = statement
+                .query_map([], |row| row.get::<_, i64>(0))
+                .expect("consulta")
+                .flatten()
+                .collect::<Vec<_>>();
+            drop(statement);
+            let (mut converted, mut degraded, mut good, mut broken, mut empty) = (0, 0, 0, 0, 0);
+            let mut stats = crate::RvfStats::default();
+            let started = std::time::Instant::now();
+            for id in &ids {
+                let Ok(raw) = module.read_content_bytes(*id) else {
+                    continue;
+                };
+                let result = crate::convert_rvf(&raw);
+                converted += 1;
+                degraded += usize::from(result.degraded);
+                empty += usize::from(result.nodes.is_empty());
+                stats.items += result.stats.items;
+                for (key, value) in result.stats.links {
+                    *stats.links.entry(key).or_default() += value;
+                }
+                for (key, value) in result.stats.unknown {
+                    *stats.unknown.entry(key).or_default() += value;
+                }
+                let plain = result
+                    .nodes
+                    .iter()
+                    .map(Node::to_plain_text)
+                    .collect::<String>();
+                let chars = plain.chars().collect::<Vec<_>>();
+                let mojibake = chars
+                    .windows(2)
+                    .any(|w| w[0] == 'Ã' && "©£³§\u{ad}¡ªº".contains(w[1]));
+                if mojibake || plain.contains('\u{fffd}') {
+                    broken += 1;
+                    let at = chars
+                        .windows(2)
+                        .position(|w| w[0] == 'Ã' && "©£³§\u{ad}¡ªº".contains(w[1]))
+                        .or_else(|| chars.iter().position(|c| *c == '\u{fffd}'))
+                        .unwrap_or(0);
+                    let from = at.saturating_sub(12);
+                    let masked = chars[from..(at + 12).min(chars.len())]
+                        .iter()
+                        .map(|c| {
+                            if c.is_alphabetic() && c.is_ascii() {
+                                'x'
+                            } else {
+                                *c
+                            }
+                        })
+                        .collect::<String>();
+                    eprintln!("broken id={id} mojibake={mojibake} ctx={masked:?}");
+                } else if plain.chars().any(|c| "áéíóúãõçâêô".contains(c)) {
+                    good += 1;
+                }
+            }
+            let elapsed = started.elapsed();
+            let per_entry_us = elapsed.as_micros() / converted.max(1) as u128;
+            eprintln!(
+                "{label}: rvf={} converted={converted} degraded={degraded} empty={empty} items={} accents_ok={good} accents_broken={broken} links={:?} unknown={:?} us_per_entry={per_entry_us}",
+                ids.len(),
+                stats.items,
+                stats.links,
+                stats.unknown
+            );
+        }
+        let path = std::path::Path::new(&root).join("Strong_AMG2.dct.twm");
+        let module = TwmModule::open(&path).expect("abrir módulo real");
+        let id = module
+            .connection
+            .query_row("SELECT id FROM topics WHERE subject = 'G3056'", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .ok();
+        let ok = id
+            .and_then(|id| module.read_content_bytes(id).ok())
+            .map(|raw| {
+                let result = crate::convert_rvf(&raw);
+                (!result.nodes.is_empty(), result.degraded)
+            });
+        eprintln!("G3056 (nós, degradado): {ok:?}");
     }
 
     #[test]

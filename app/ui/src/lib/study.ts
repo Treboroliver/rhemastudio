@@ -7,6 +7,7 @@ export interface LexiconEntryDto {
   original_word: string | null
   module_id: string
   module_title: string
+  degraded?: boolean
   nodes: UiNode[]
 }
 
@@ -44,6 +45,7 @@ export interface CommentaryPageDto {
   offset: number
   next_offset: number
   has_more: boolean
+  degraded?: boolean
   nodes: UiNode[]
 }
 

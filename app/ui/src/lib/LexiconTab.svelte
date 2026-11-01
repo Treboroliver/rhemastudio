@@ -119,6 +119,7 @@
           {#if entry.original_word}<p class="original-word" dir="auto">{entry.original_word}</p>{/if}
           <p class="panel-note">{entry.module_title}</p>
         </header>
+        {#if entry.degraded}<p class="panel-note" role="status">{t('contentDegraded')}</p>{/if}
         <RichContent nodes={entry.nodes} {t} {actions} />
       </article>
     {:else if errorCode === 'no_lexicon_installed'}

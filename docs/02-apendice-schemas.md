@@ -380,12 +380,33 @@ Frequências em todos os 110 valores de `content.data` (18.848.948 bytes):
 - Leitores podem ignorar registros desconhecidos usando a quantidade de strings declarada; os comprimentos e delimitadores precisam ser respeitados.
 - O cabeçalho observado `-8 1 3` é compatível com RVF 1.3 e `-9 2 0 0 2 0 1` tem forma plausível de registro de propriedades; a correspondência de cada campo no perfil theWord ainda requer confirmação.
 
-**Proposta provisória e plano de teste (não implementado).**
-1. Tratar `content_type=rvf` como fluxo binário independente, sem UTF-8/RTF heurístico; limitar toda leitura ao slice de entrada e usar cursor com checagem de overflow.
-2. Validar `-8`/versão e ler registros até EOF; interpretar somente tipos documentados e variantes observadas, respeitando CRLF, contagem de strings e comprimentos binários.
-3. Preservar/ignorar tipos desconhecidos conforme contagem declarada; retornar `Corrupted` para cabeçalho, contagem ou registro truncado/inconsistente; nunca converter links em alvos sem reconhecer seu esquema.
-4. Fixtures sintéticas cobrem versão 1.3, campos, texto/Unicode, controles NUL/CR/LF, binários, registros desconhecidos, limites de tamanho, entradas vazias/truncadas e contagens malformadas.
-5. Propriedades aleatórias validam ausência de panic/overflow e consumo limitado; testes de saída verificam `plain_text` e links sem amostras protegidas. Comparação com arquivo real autorizado deve ser somente leitura e validar estrutura/contagens, não snapshots de texto.
+#### Especificação RVF observada (M1.5, implementada em `rvf.rs`)
+
+Fonte: análise somente leitura de VidaNova (110 entradas RVF), Strong_AMG2 (32, em `topics`), BEP (1.181 em `bible_refs`) e Holman-AT (1, com `data` NULL). Nenhum módulo tem `do.encrypt`, `secure` ou `compressed` ligados. Contagens e estrutura apenas; nenhum texto real é reproduzido.
+
+**Estrutura da entrada** (CRLF entre linhas):
+1. Linha `-8 1 3` (versão; uma entrada da BEP tem `-8 1 3 2`). Sem esse prefixo a entrada é tratada como degradada.
+2. Marcadores `-9 a b c d e f`. `-9 2 0 0 2 0 1` precede a tabela de estilos de texto; `… 2` a de estilos de parágrafo; `-9 2 0 0 2 0 4` pode aparecer (VidaNova); `-9 0 0 0 0 0 7` encerra as tabelas; `-9 2 0 0 2 0 3` seguido de um registro binário curto aparece no VidaNova. O primeiro item do corpo vem após o último marcador.
+3. Cada tabela é `[nome]\r\n[blob]`; o marcador seguinte vem colado ao fim do blob. O blob é um fluxo binário Delphi: 4 bytes de tamanho (o `0x0e` desse preâmbulo pode aparecer no tamanho, então a coleção começa no índice 4), `0x0e` (coleção) e itens iniciados por `0x01`, com propriedades `len+nome` e valor tipado (string 6, ident 7, int8 2, False 8, True 9, conjunto `0x0b` com nomes terminados por len 0, etc.), fim `0x00`. Propriedades vistas: `StyleName`, `FontName`, `Style` (`fsBold`, `fsItalic`, `fsUnderline`), `Color`, `Size`, `Charset`, `HoverColor`, `HoverEffects`.
+4. Corpo: sequência de itens. Cabeçalho do item: `estilo linhas parágrafo opções extra tag\r\n`, onde `estilo` é o índice na tabela de estilos de texto (negativo = item especial, ignorado e contado), `parágrafo` ≥ 0 inicia parágrafo e −1 continua o anterior, `opções` é 8 ou 9, `extra` é 0, `tag` é inteiro (0 = sem tag) ou texto entre aspas.
+5. O texto do item segue o CRLF do cabeçalho e termina em `)` seguido de espaço e do próximo cabeçalho (o último item termina em `)` no fim). Codificação: UTF-16LE (grego e hebraico entram como Unicode normal); entradas sem bytes nulos alternados usam UTF-8 válido ou Windows-1252.
+
+**Tags de link** (por contagem): `tw://bible.*?id=B.C.V|chave|` e `…id=B.C.V-B.C.V|chave|` (maioria; BEP 16.966 itens, VidaNova 5.611 itens, Strong_AMG2 497); `tw://[self]?tid=N` e `…#bkmN` (interno); `tw://bk.<livro>` (BEP, 13); `tw://dct.<módulo>?t=…` (verbete); `file:///…` (VidaNova, caminhos do autor, mantidos como link de arquivo inerte). Itens adjacentes com a mesma tag viram um único `Node::Link`.
+
+**Saída.** `Vec<Node>` com `Text`/`Bold`/`Italic`/`Underline`, `Paragraph` e `Link`; `Node` não foi ampliado. Estrutura não reconhecida (sem `-8`, sem itens, sem tabela de estilos ou saída vazia) devolve o melhor texto com `degraded = true`; a interface mostra um aviso discreto. `UnsupportedContent` fica só para `content_type` realmente desconhecido.
+
+**Limitações conhecidas.** Estilos de parágrafo (alinhamento) e itens especiais (estilo negativo; imagens/tabulação) não são aproveitados. A entrada com `data` NULL do Holman não tem conteúdo a converter. Uma entrada do VidaNova contém um trecho de bytes ASCII lido como UTF-16 (texto ilegível localizado).
+
+**Medição (release, somente números).**
+
+| Módulo | RVF | Convertidas | Degradadas | Acentos ok / quebrados | Links por tipo | Desconhecidas | µs/entrada |
+|---|---:|---:|---:|---|---|---|---:|
+| VidaNova | 110 | 110 | 0 | 109 / 1 | bíblia 5.611, interno 1.260, arquivo 495, outro 777 | estilo negativo −2: 608 | ~7.300 |
+| Strong_AMG2 | 32 | 32 | 0 | 28 / 0 | bíblia 497, interno 101, verbete 1, outro 1 | 0 | ~400 |
+| Holman | 1 | 0 (dados NULL) | 0 | – | – | – | – |
+| BEP | 1.181 | 1.181 | 0 | 1.175 / 0 | bíblia 16.966, livro 13, interno 1, outro 670 | 0 | ~575 |
+
+G3056 de Strong_AMG2 converte (nós gerados, sem degradação).
 
 #### Contagens de palavras de controle nos comentários
 

@@ -207,6 +207,7 @@ pub struct LexiconEntryDto {
     pub original_word: Option<String>,
     pub module_id: String,
     pub module_title: String,
+    pub degraded: bool,
     pub nodes: Vec<UiNode>,
 }
 
@@ -253,6 +254,7 @@ pub fn lookup_strong(
                         original_word: entry.strong_orig_word,
                         module_id: module.id.clone(),
                         module_title: module.title.clone(),
+                        degraded: entry.degraded,
                         nodes: convert_nodes(&nodes),
                     });
                 }
@@ -325,6 +327,7 @@ pub struct CommentaryPageDto {
     pub offset: u64,
     pub next_offset: u64,
     pub has_more: bool,
+    pub degraded: bool,
     pub nodes: Vec<UiNode>,
 }
 
@@ -508,6 +511,7 @@ pub fn commentary_entry(
         offset,
         next_offset: page.next_offset,
         has_more: page.has_more,
+        degraded: page.degraded,
         nodes: convert_nodes(&page.nodes),
     })
 }
@@ -607,10 +611,8 @@ mod tests {
             code(std::slice::from_ref(&lexicon), "G9999"),
             "entry_not_found"
         );
-        assert_eq!(
-            code(std::slice::from_ref(&lexicon), "G26"),
-            "unsupported_format"
-        );
+        let degraded = lookup_strong(&cache, std::slice::from_ref(&lexicon), "G26").expect("RVF");
+        assert!(degraded.degraded);
         assert_eq!(
             code(std::slice::from_ref(&lexicon), "X25"),
             "invalid_strong_id"
@@ -666,11 +668,8 @@ mod tests {
                 .module_id,
             "full"
         );
-        // G26 é RVF no primeiro e RVF no segundo: o aviso de formato prevalece sobre "não encontrado".
-        assert_eq!(
-            lookup_strong(&cache, &both, "G26").expect_err("RVF").code,
-            "unsupported_format"
-        );
+        // G26 é RVF: converte com o marcador de conteúdo degradado.
+        assert!(lookup_strong(&cache, &both, "G26").expect("RVF").degraded);
         assert_eq!(
             lookup_strong(&cache, &[second, first], "G25")
                 .expect("G25")
@@ -778,7 +777,7 @@ mod tests {
             ]
         );
         assert!(entries[0].size_bytes.unwrap_or_default() > 1_000);
-        assert!(entries[0].supported && !entries[1].supported);
+        assert!(entries[0].supported && entries[1].supported);
         assert_eq!(entries[1].content_type, "rvf");
         let encoded = json(&index).to_string();
         assert!(!encoded.contains("nodes") && !encoded.contains("Synthetic"));
@@ -880,12 +879,11 @@ mod tests {
         }
         assert!(encoded.contains("Synthetic paragraph 1 ") && !encoded.contains("paragraph 61 "));
 
-        // A entrada RVF não afeta as demais.
-        assert_eq!(
+        // A entrada RVF sintética é degradada, mas não afeta as demais.
+        assert!(
             commentary_entry(&cache, &commentary, 50, 0)
-                .expect_err("RVF")
-                .code,
-            "unsupported_format"
+                .expect("RVF")
+                .degraded
         );
         assert!(commentary_entry(&cache, &commentary, 10, 0).is_ok());
         assert_eq!(

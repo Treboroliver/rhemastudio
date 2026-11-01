@@ -120,6 +120,7 @@
   "commentaryError": "The commentaries could not be loaded.",
   "commentaryModuleError": "This module could not be read.",
   "commentaryUnsupported": "Format not supported yet.",
+  "contentDegraded": "Some formatting in this text could not be displayed.",
   "commentaryMore": "Show more",
   "commentaryModules": "Active commentaries",
   "unknownLinkHint": "Unsupported link type ({type})",

@@ -29,6 +29,7 @@
   interface PageState {
     nodes: UiNode[]
     hasMore: boolean
+    degraded?: boolean
     nextOffset: number
     loading: boolean
     errorCode: string | null
@@ -113,6 +114,7 @@
         [key]: {
           nodes: offset === 0 ? page.nodes : [...(previous?.nodes ?? []), ...page.nodes],
           hasMore: page.has_more,
+          degraded: page.degraded || previous?.degraded,
           nextOffset: page.next_offset,
           loading: false,
           errorCode: null
@@ -202,6 +204,9 @@
                       {#if page}
                         {#if page.nodes.length}
                           <RichContent nodes={page.nodes} {t} {actions} />
+                        {/if}
+                        {#if page.degraded && !page.loading}
+                          <p class="panel-note" role="status">{t('contentDegraded')}</p>
                         {/if}
                         {#if page.loading}
                           <p class="panel-note" role="status">{t('commentaryLoading')}</p>
