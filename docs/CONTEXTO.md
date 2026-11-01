@@ -1,9 +1,10 @@
-# Contexto — M4a.1
+# Contexto — M1.5
 
-Atualizado em 2026-11-01. M4a.1 concluído; M4b e parser RVF continuam fora do escopo.
+Atualizado em 2026-11-02. M1.5 concluído (RTF medido, parser RVF, título `<-`); M4b continua fora do escopo.
 
-- RTF: o conversor descarta somente um espaço delimitador após palavra de controle; espaços de texto após escapes e grupos são preservados. Teste sintético cobre esses casos. A amostra mascarada de NICNT mostrou vírgula seguida diretamente por letras no RTF bruto; não foi inserido espaço nem alterado conteúdo.
-- Contagens de vírgula-letra em 2.000 linhas: bruto→convertido — Holman-AT 0→0, NICNT 106→8.080 e Strong_AMG2 5→7 (1.998 linhas RTF). Sem correção de texto, os valores convertidos antes/depois permanecem iguais.
-- Abertura `.twm` consulta só chaves selecionadas de `config`, nunca `about`; VidaNova: 47 ms no registro anterior e 2,596 ms de mediana em três aberturas release aquecidas.
-- Comentários seguem paginados por até 60 parágrafos e 8.000 caracteres. Interface de colunas, menu `Aa` e preferência persistente de destaque de Jesus estão integrados; os tokens `--jesus` já passam contraste ≥ 4,5:1 nos dois temas.
+- RVF: `rvf.rs` converte as entradas de VidaNova (110), Strong_AMG2 (32, incl. G3056), BEP (1.181) para `Vec<Node>`; Holman tem 1 entrada RVF com dados NULL. Estrutura estranha vira `degraded` (aviso discreto na interface), nunca erro. Especificação em `docs/02-apendice-schemas.md`.
+- RTF/espaços: a medição (2.000 entradas) mostrou que o conversor não descarta espaços reais; o "espaço perdido" é o delimitador após palavra de controle (RTF). Sem alteração no conversor.
+- Biblioteca: valores de propriedade têm espaços e o sufixo ` <-` removidos (o marcador está no arquivo da BJ, em `lang` e `description`); `CATALOG_VERSION` = 5.
+- Abertura `.twm` consulta só chaves selecionadas de `config`, nunca `about`.
+- Comentários seguem paginados por até 60 parágrafos e 8.000 caracteres.
 - Restrições observadas: conteúdo de módulos protegidos não foi aberto; nenhum texto real de módulo foi salvo em código, testes ou documentos.

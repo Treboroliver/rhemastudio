@@ -1,5 +1,11 @@
 # Changelog — RhemaStudio
 
+## [M1.5] — 2026-11-02
+
+- RTF: medição em 2.000 entradas (NICNT, Holman, Strong_AMG2) confirmou que o conversor não perde espaços reais; os casos "vírgula + letra" são delimitadores de palavra de controle. Teste sintético das estruturas observadas.
+- RVF: novo `rvf.rs` (parser tolerante, proptest); `decode_twm_content` converte RVF e marca `degraded` quando a estrutura não é reconhecida; `UnsupportedContent` só para tipos desconhecidos. Interface mostra aviso discreto. VidaNova 110, Strong_AMG2 32 (G3056 ok) e BEP 1.181 entradas convertidas, 0 degradadas.
+- Biblioteca: remove o sufixo ` <-` dos valores de propriedade (título e idioma da BJ); `CATALOG_VERSION` 5.
+
 ## [M4a.1] — 2026-11-01
 
 - RTF: teste sintético comprova preservação dos espaços textuais; não foi inserido espaço quando ausente na origem. Vírgula-letra no convertido (2.000 linhas, antes→depois): Holman-AT 0→0; NICNT 8.080→8.080; Strong_AMG2 7→7 (1.998 linhas RTF). No RTF bruto: 0, 106 e 5, respectivamente.

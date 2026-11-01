@@ -69,7 +69,7 @@ pub struct Library {
 
 /// Versão do formato e das regras de metadados gravadas no catalog.json.
 /// Qualquer alteração em como títulos ou metadados são calculados exige incrementar este valor.
-pub const CATALOG_VERSION: u32 = 4;
+pub const CATALOG_VERSION: u32 = 5;
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 struct FolderCatalog {
@@ -466,7 +466,11 @@ fn read_bible_metadata(file: &mut File, size: u64, path: &Path) -> Result<Metada
         if !is_metadata_key(&key) {
             continue;
         }
-        let value = decode_metadata_value(&value_bytes, charset.as_deref(), utf8_override);
+        let value = clean_metadata_value(&decode_metadata_value(
+            &value_bytes,
+            charset.as_deref(),
+            utf8_override,
+        ));
         props.insert(key, value);
     }
     let short_title = props.get("short.title").cloned();
@@ -843,6 +847,15 @@ fn module_info(
     }
 }
 
+/// Alguns módulos terminam valores de propriedade com o marcador `<-`; ele não faz parte do texto.
+fn clean_metadata_value(value: &str) -> String {
+    let mut text = value.trim();
+    while let Some(rest) = text.strip_suffix("<-") {
+        text = rest.trim_end();
+    }
+    text.to_string()
+}
+
 fn normalize_language(value: &str) -> (&str, &str) {
     match value.trim().to_ascii_lowercase().as_str() {
         "por" | "pt" | "pt-br" | "pt_br" | "br" => ("pt", "Português"),
@@ -1050,6 +1063,26 @@ mod tests {
         assert!(scan.modules.iter().any(|module| {
             module.title == "Bíblia com UTF-8" && module.abbreviation.as_deref() == Some("UTF")
         }));
+    }
+
+    #[test]
+    fn strips_trailing_arrow_marker_from_title_and_language() {
+        let temp = tempdir().expect("tempdir");
+        let modules = temp.path().join("modules");
+        fs::create_dir(&modules).expect("module dir");
+        fs::write(
+            modules.join("marker.ont"),
+            "Versículo sintético\n\nlang = pt <-\ndescription = Título sintético  <- \nshort.title = TST\n",
+        )
+        .expect("write module");
+        let scan = library(temp.path()).scan(&[modules], |_| {}).expect("scan");
+        let module = &scan.modules[0];
+        assert_eq!(module.title, "Título sintético");
+        assert_eq!(module.description.as_deref(), Some("Título sintético"));
+        assert_eq!(module.language.as_deref(), Some("pt"));
+        assert_eq!(module.language_name.as_deref(), Some("Português"));
+        assert_eq!(clean_metadata_value("a <-<-"), "a");
+        assert_eq!(clean_metadata_value("a<b"), "a<b");
     }
 
     #[test]
