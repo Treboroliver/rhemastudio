@@ -13,11 +13,22 @@ const strings: Record<string, string> = {
   readingArea: 'Leitura paralela',
   previousChapter: 'Capítulo anterior',
   nextChapter: 'Próximo capítulo',
+  chapterNavigation: 'Navegação de capítulo',
   decreaseFont: 'Diminuir fonte',
   resetFont: 'Fonte padrão',
   increaseFont: 'Aumentar fonte',
+  fontSize: 'Tamanho do texto',
   showStrongNumbers: 'Mostrar Strong',
+  highlightWordsOfJesus: 'Destacar palavras de Jesus',
+  readingSettings: 'Configurações da leitura',
+  theme: 'Tema',
+  themeDark: 'Escuro',
+  themeLight: 'Claro',
+  themeAuto: 'Automático',
   addBible: 'Adicionar Bíblia',
+  addBibleButton: '+ Bíblia',
+  parallelLimit: 'O máximo é quatro Bíblias paralelas.',
+  activateBibleColumn: 'Ativar {title} ({shortcut})',
   removeBible: 'Remover {title}',
   narrowColumnsNotice: 'Janela estreita: no máximo duas Bíblias.',
   chapterLoading: 'Carregando capítulo',
@@ -87,6 +98,8 @@ function props(ids: string[], rows: AlignedChaptersDto, extras: Record<string, u
     canNext: true,
     fontSize: 20,
     showStrong: false,
+    highlightJesusWords: true,
+    theme: 'dark' as const,
     canAdd: true,
     onAdd: vi.fn(),
     onRemove: vi.fn(),
@@ -96,6 +109,8 @@ function props(ids: string[], rows: AlignedChaptersDto, extras: Record<string, u
     onNext: vi.fn(),
     onFontSize: vi.fn(),
     onToggleStrong: vi.fn(),
+    onToggleJesusWords: vi.fn(),
+    onThemeChange: vi.fn(),
     ...extras
   }
 }
@@ -106,16 +121,24 @@ describe('parallel Bible pane', () => {
     render(ParallelBiblePane, { props: componentProps })
     await fireEvent.click(screen.getByRole('button', { name: 'Adicionar Bíblia' }))
     expect(componentProps.onAdd).toHaveBeenCalledOnce()
+    expect(screen.getByRole('button', { name: 'Ativar Synthetic a (Alt+1)' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByText('Alt+2')).toBeTruthy()
     await fireEvent.click(screen.getByRole('button', { name: 'Remover Synthetic b' }))
     expect(componentProps.onRemove).toHaveBeenCalledWith('b')
-    await fireEvent.click(screen.getByRole('button', { name: 'Synthetic b' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Ativar Synthetic b (Alt+2)' }))
     expect(componentProps.onActivate).toHaveBeenCalledWith('b')
   })
 
   it('disables adding when all four columns are occupied', () => {
     const ids = ['a', 'b', 'c', 'd']
     render(ParallelBiblePane, { props: props(ids, aligned(ids), { canAdd: false }) })
-    expect(screen.getByRole('button', { name: 'Adicionar Bíblia' }).hasAttribute('disabled')).toBe(true)
+    const add = screen.getByRole('button', { name: 'Adicionar Bíblia' })
+    expect(add.hasAttribute('disabled')).toBe(true)
+    expect(add.getAttribute('title')).toContain('quatro')
+    const hintId = add.getAttribute('aria-describedby')
+    expect(hintId).toBe('parallel-limit-hint')
+    expect(add.closest('.add-column-wrap')?.getAttribute('title')).toContain('quatro')
+    expect(document.getElementById(hintId ?? '')?.textContent).toContain('quatro')
   })
 
   it('shows only two columns in a narrow window and explains the limit', () => {

@@ -865,7 +865,9 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(unsupported, [(50, "rvf")]);
 
-        let first = source.entry_page(40, 0, 60, 8_000).expect("primeira página");
+        let first = source
+            .entry_page(40, 0, 60, 8_000)
+            .expect("primeira página");
         let paragraphs = |page: &RtfPage| {
             page.nodes
                 .iter()
@@ -978,7 +980,8 @@ mod tests {
                             && raw[i + 1..(i + 9).min(raw.len())]
                                 .iter()
                                 .any(|n| matches!(n, b'\\' | b'{' | b'}'))
-                            && patterns.insert(mask(&raw[i.saturating_sub(10)..(i + 40).min(raw.len())]))
+                            && patterns
+                                .insert(mask(&raw[i.saturating_sub(10)..(i + 40).min(raw.len())]))
                         {
                             shown += 1;
                             break;

@@ -102,7 +102,10 @@ pub fn page_cursor(paragraph: usize, character: usize) -> u64 {
 }
 
 fn split_cursor(cursor: u64) -> (usize, usize) {
-    ((cursor >> 32) as usize, (cursor & u64::from(u32::MAX)) as usize)
+    (
+        (cursor >> 32) as usize,
+        (cursor & u64::from(u32::MAX)) as usize,
+    )
 }
 
 /// Janela de leitura: até `max_paragraphs` parágrafos e `max_chars` caracteres a partir de
@@ -200,7 +203,8 @@ pub fn convert_rtf_page(
     Ok(RtfPage {
         nodes: conversion.nodes,
         has_more,
-        next_offset: next.unwrap_or_else(|| page_cursor(start.saturating_add(max_paragraphs.max(1)), 0)),
+        next_offset: next
+            .unwrap_or_else(|| page_cursor(start.saturating_add(max_paragraphs.max(1)), 0)),
     })
 }
 
@@ -980,15 +984,42 @@ mod tests {
     }
 
     #[test]
+    fn preserves_literal_spaces_around_control_words_hex_unicode_and_groups() {
+        let control_delimiter = convert_rtf(br"{\rtf1 A,\b B}").expect("delimitador de controle");
+        assert_eq!(plain_text(&control_delimiter), "A,B");
+
+        let text_before_control =
+            convert_rtf(br"{\rtf1 A, \b B}").expect("espaço textual antes do controle");
+        assert_eq!(plain_text(&text_before_control), "A, B");
+
+        let repeated_delimiter =
+            convert_rtf(br"{\rtf1 A,\b  B}").expect("espaço adicional após controle");
+        assert_eq!(plain_text(&repeated_delimiter), "A, B");
+
+        let hex_space = convert_rtf(br"{\rtf1 A,\'20 B}").expect("espaço hexadecimal");
+        assert_eq!(plain_text(&hex_space), "A,  B");
+
+        let unicode_space = convert_rtf(br"{\rtf1 A,\u233? B}").expect("espaço Unicode");
+        assert_eq!(plain_text(&unicode_space), "A,é B");
+
+        let group_space = convert_rtf(br"{\rtf1 A,{ }B}").expect("espaço de grupo");
+        assert_eq!(plain_text(&group_space), "A, B");
+    }
+
+    #[test]
     fn character_limit_splits_a_giant_paragraph_without_loss() {
-        let rtf = br"{\rtf1 Alpha beta gamma delta {\b epsilon zeta} eta theta iota kappa\par Next one}";
+        let rtf =
+            br"{\rtf1 Alpha beta gamma delta {\b epsilon zeta} eta theta iota kappa\par Next one}";
         let full = plain_text(&convert_rtf(rtf).expect("RTF sintético"));
         for limit in [1, 2, 3, 5, 7, 11, 20] {
             let mut text = String::new();
             let (mut offset, mut pages) = (0, 0);
             loop {
                 let page = convert_rtf_page(rtf, offset, 60, limit).expect("página");
-                assert!(plain_text(&page.nodes).chars().count() <= limit + 1, "limite {limit}");
+                assert!(
+                    plain_text(&page.nodes).chars().count() <= limit + 1,
+                    "limite {limit}"
+                );
                 text.push_str(&plain_text(&page.nodes));
                 pages += 1;
                 assert!(pages < 200, "sem progresso");
@@ -1015,8 +1046,7 @@ mod tests {
         assert_eq!(plain_text(&rest.nodes), "Two");
         let beyond = convert_rtf_page(rtf, page_cursor(50, 0), 10, 8_000).expect("depois do fim");
         assert!(beyond.nodes.is_empty() && !beyond.has_more);
-        let unterminated =
-            convert_rtf_page(br"{\rtf1 Only text", 0, 60, 8_000).expect("sem par");
+        let unterminated = convert_rtf_page(br"{\rtf1 Only text", 0, 60, 8_000).expect("sem par");
         assert_eq!(plain_text(&unterminated.nodes), "Only text");
         assert!(!unterminated.has_more);
     }

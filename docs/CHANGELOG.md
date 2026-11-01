@@ -1,5 +1,12 @@
 # Changelog — RhemaStudio
 
+## [M4a.1] — 2026-11-01
+
+- RTF: teste sintético comprova preservação dos espaços textuais; não foi inserido espaço quando ausente na origem. Vírgula-letra no convertido (2.000 linhas, antes→depois): Holman-AT 0→0; NICNT 8.080→8.080; Strong_AMG2 7→7 (1.998 linhas RTF). No RTF bruto: 0, 106 e 5, respectivamente.
+- `.twm`: `TwmModule::open` continua lendo apenas chaves permitidas de `config`, sem `about`; VidaNova: registro prévio 47 ms; mediana atual 2,596 ms (3 aberturas release aquecidas).
+- Leitura: cabeçalho fixo por coluna, botão `+ Bíblia` com limite acessível e menu `Aa` para fonte/tema/Strong/destaque de Jesus; preferência de Jesus persiste e usa token CSS já testado em contraste.
+- Paginação de comentário já limita a 60 parágrafos e 8.000 caracteres; testes Rust e UI cobrem os limites.
+
 ## [M4a] — 2026-10-31
 
 ### Concluído (M4.1, M4.2 e M4.5)

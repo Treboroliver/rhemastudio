@@ -28,6 +28,7 @@ export interface AppSettings {
   interface_language: 'pt-BR' | 'en'
   theme: 'dark' | 'light' | 'auto'
   show_strong_numbers: boolean
+  highlight_words_of_jesus: boolean
   bible_font_size: number
   first_use_completed: boolean
   last_passage?: { book: number; chapter: number; verse?: number | null } | null

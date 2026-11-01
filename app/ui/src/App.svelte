@@ -40,13 +40,14 @@
 
   const dictionaries = { 'pt-BR': ptBr, en }
   const defaults: AppSettings = {
-    schema_version: 3,
+    schema_version: 4,
     module_folders: [],
     default_bible_id: null,
     selected_bible_ids: [],
     interface_language: 'pt-BR',
     theme: 'dark',
     show_strong_numbers: false,
+    highlight_words_of_jesus: true,
     bible_font_size: 20,
     first_use_completed: false,
     lexicon_module_ids: null,
@@ -542,6 +543,7 @@
     if (typeof document !== 'undefined') {
       document.documentElement.lang = settings.interface_language
       applyTheme(settings.theme, document.documentElement)
+      document.documentElement.dataset.highlightJesus = String(settings.highlight_words_of_jesus)
     }
   })
 </script>
@@ -576,23 +578,6 @@
         <div><h1>{t('appName')}</h1><p>{t('tagline')}</p></div>
       </div>
       <div class="topbar-actions">
-        <label class="sr-only" for="theme-select">{t('theme')}</label>
-        <select
-          id="theme-select"
-          class="theme-select"
-          aria-label={t('theme')}
-          value={settings.theme}
-          onchange={(event) => {
-            const value = event.currentTarget.value
-            if (value === 'dark' || value === 'light' || value === 'auto') {
-              void saveSettings({ theme: value })
-            }
-          }}
-        >
-          <option value="dark">{t('themeDark')}</option>
-          <option value="light">{t('themeLight')}</option>
-          <option value="auto">{t('themeAuto')}</option>
-        </select>
         <button
           class="command-open study-toggle"
           type="button"
@@ -637,6 +622,8 @@
           {canNext}
           fontSize={settings.bible_font_size}
           showStrong={settings.show_strong_numbers}
+          highlightJesusWords={settings.highlight_words_of_jesus}
+          theme={settings.theme}
           canAdd={selectedBibleIds.length < 4 && readyBibles.some((module) => !selectedBibleIds.includes(module.id))}
           onAdd={addBible}
           onRemove={removeBible}
@@ -646,6 +633,8 @@
           onNext={goNext}
           onFontSize={(direction) => void saveSettings({ bible_font_size: resizeBibleFont(settings.bible_font_size, direction) })}
           onToggleStrong={() => void saveSettings({ show_strong_numbers: !settings.show_strong_numbers })}
+          onToggleJesusWords={() => void saveSettings({ highlight_words_of_jesus: !settings.highlight_words_of_jesus })}
+          onThemeChange={(theme) => void saveSettings({ theme })}
           onStrong={openStrong}
         />
       {/if}

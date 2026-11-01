@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte'
   import NodeView from './NodeView.svelte'
-  import type { ModuleInfo } from './modules'
+  import type { AppSettings, ModuleInfo } from './modules'
   import type { AlignedChaptersDto, ApiError } from './reader'
 
   interface Props {
@@ -18,6 +18,8 @@
     canNext: boolean
     fontSize: number
     showStrong: boolean
+    highlightJesusWords: boolean
+    theme: AppSettings['theme']
     canAdd: boolean
     onAdd: () => void
     onRemove: (id: string) => void
@@ -27,6 +29,8 @@
     onNext: () => void
     onFontSize: (direction: -1 | 0 | 1) => void
     onToggleStrong: () => void
+    onToggleJesusWords: () => void
+    onThemeChange: (theme: AppSettings['theme']) => void
     onStrong?: (ids: string[], element: HTMLElement) => void
   }
 
@@ -44,6 +48,8 @@
     canNext,
     fontSize,
     showStrong,
+    highlightJesusWords,
+    theme,
     canAdd,
     onAdd,
     onRemove,
@@ -53,6 +59,8 @@
     onNext,
     onFontSize,
     onToggleStrong,
+    onToggleJesusWords,
+    onThemeChange,
     onStrong
   }: Props = $props()
 
@@ -162,15 +170,56 @@
 
 <section class="bible-pane parallel-pane" aria-label={t('readingArea')}>
   <header class="pane-header parallel-toolbar">
-    <button class="nav-button" aria-label={t('previousChapter')} title={`${t('previousChapter')} (Ctrl+←)`} disabled={!canPrevious} onclick={onPrevious}>‹</button>
-    <div class="pane-title"><h2>{title ?? t('selectBible')}</h2></div>
-    <button class="nav-button" aria-label={t('nextChapter')} title={`${t('nextChapter')} (Ctrl+→)`} disabled={!canNext} onclick={onNext}>›</button>
+    <div class="chapter-controls" role="group" aria-label={t('chapterNavigation')}>
+      <button class="nav-button" aria-label={t('previousChapter')} title={`${t('previousChapter')} (Ctrl+←)`} disabled={!canPrevious} onclick={onPrevious}>‹</button>
+      <div class="pane-title"><h2 title={title ?? t('selectBible')}>{title ?? t('selectBible')}</h2></div>
+      <button class="nav-button" aria-label={t('nextChapter')} title={`${t('nextChapter')} (Ctrl+→)`} disabled={!canNext} onclick={onNext}>›</button>
+    </div>
     <div class="reading-controls">
-      <button class="quiet compact-control" aria-label={t('decreaseFont')} title="Ctrl+-" disabled={fontSize <= 14} onclick={() => onFontSize(-1)}>A−</button>
-      <button class="quiet compact-control" aria-label={t('resetFont')} title="Ctrl+0" onclick={() => onFontSize(0)}>Aa {fontSize}</button>
-      <button class="quiet compact-control" aria-label={t('increaseFont')} title="Ctrl+=" disabled={fontSize >= 32} onclick={() => onFontSize(1)}>A+</button>
-      <label class="strong-toggle"><input type="checkbox" checked={showStrong} onchange={onToggleStrong} />{t('showStrongNumbers')}</label>
-      <button class="primary add-column" aria-label={t('addBible')} disabled={!canAdd || columns.length >= 4} onclick={onAdd}>+</button>
+      <details class="reading-menu">
+        <summary class="compact-control settings-trigger" aria-label={t('readingSettings')} title={t('readingSettings')}>Aa</summary>
+        <div class="reading-menu-popover" role="region" aria-label={t('readingSettings')}>
+          <div class="font-controls" role="group" aria-label={t('fontSize')}>
+            <button class="quiet compact-control" aria-label={t('decreaseFont')} title="Ctrl+-" disabled={fontSize <= 14} onclick={() => onFontSize(-1)}>A−</button>
+            <button class="quiet compact-control" aria-label={t('resetFont')} title="Ctrl+0" onclick={() => onFontSize(0)}>{fontSize} px</button>
+            <button class="quiet compact-control" aria-label={t('increaseFont')} title="Ctrl+=" disabled={fontSize >= 32} onclick={() => onFontSize(1)}>A+</button>
+          </div>
+          <label class="menu-setting">
+            <input type="checkbox" checked={showStrong} onchange={onToggleStrong} />
+            {t('showStrongNumbers')}
+          </label>
+          <label class="menu-setting">
+            <input type="checkbox" checked={highlightJesusWords} onchange={onToggleJesusWords} />
+            {t('highlightWordsOfJesus')}
+          </label>
+          <label class="theme-setting">
+            <span>{t('theme')}</span>
+            <select
+              aria-label={t('theme')}
+              value={theme}
+              onchange={(event) => {
+                const value = event.currentTarget.value
+                if (value === 'dark' || value === 'light' || value === 'auto') onThemeChange(value)
+              }}
+            >
+              <option value="dark">{t('themeDark')}</option>
+              <option value="light">{t('themeLight')}</option>
+              <option value="auto">{t('themeAuto')}</option>
+            </select>
+          </label>
+        </div>
+      </details>
+      <span class="add-column-wrap" title={columns.length >= 4 ? t('parallelLimit') : undefined}>
+        <button
+          class="primary add-column"
+          aria-label={t('addBible')}
+          aria-describedby={columns.length >= 4 ? 'parallel-limit-hint' : undefined}
+          title={columns.length >= 4 ? t('parallelLimit') : t('addBible')}
+          disabled={!canAdd || columns.length >= 4}
+          onclick={onAdd}
+        >{t('addBibleButton')}</button>
+        {#if columns.length >= 4}<span id="parallel-limit-hint" class="sr-only">{t('parallelLimit')}</span>{/if}
+      </span>
     </div>
   </header>
 
@@ -188,7 +237,16 @@
           {#each visibleColumns as { module, index } (module.id)}
             <div class="parallel-head-cell">
               <div class="parallel-column-header" class:active-column={module.id === activeBibleId}>
-                <button class="column-activate" aria-pressed={module.id === activeBibleId} onclick={() => activate(module.id)}>{module.title}</button>
+                <button
+                  class="column-activate"
+                  aria-label={t('activateBibleColumn', { title: module.title, shortcut: `Alt+${index + 1}` })}
+                  aria-pressed={module.id === activeBibleId}
+                  title={module.title}
+                  onclick={() => activate(module.id)}
+                >
+                  <span class="column-abbreviation">{module.abbreviation ?? module.title}</span>
+                  <span class="column-shortcut" aria-hidden="true">Alt+{index + 1}</span>
+                </button>
                 <button class="remove-column" aria-label={t('removeBible', { title: module.title })} title={t('removeBible', { title: module.title })} onclick={() => onRemove(module.id)}>×</button>
               </div>
               {#if columnError(index)}

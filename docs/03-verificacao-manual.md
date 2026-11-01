@@ -54,11 +54,15 @@ Marque cada item à mão ao testar com `cargo tauri dev` (em `app/`) e módulos 
 
 ## M3b — Paralelas e aparência
 - [ ] Adicionar uma Bíblia pelo botão `+` e por Ctrl+K digitando sua abreviação; não adicionar duplicata nem ultrapassar quatro.
+- [ ] Cabeçalho fixo com uma célula por coluna (também com uma só), abreviação visível, nome completo na dica, marca ativa Alt+1..4 e remoção acessível.
+- [ ] Botão `+ Bíblia` visível; na quarta coluna fica desabilitado e informa o limite na dica.
+- [ ] Navegação anterior/título/próximo agrupados; menu `Aa` reúne fonte, tema, Strong e destaque de Jesus, com teclado acessível e texto ≥ 12 px.
 - [ ] Remover cada coluna pelo cabeçalho; alternar coluna principal com Alt+1..4; navegar e voltar/avançar no histórico mantém todas alinhadas.
 - [ ] Versículo ausente deixa um espaço discreto; Bíblia sem o livro mostra aviso somente naquela coluna; módulo protegido não é adicionado e mantém a mensagem amigável.
 - [ ] Em janela menor que 900 px, no máximo duas colunas são exibidas e há aviso; aumentar a janela restaura a visualização sem rolagem horizontal da página.
 - [ ] Fechar e reabrir restaura a ordem das colunas escolhidas.
 - [ ] Números de Strong não ficam sublinhados por padrão; hover e foco realçam a palavra. Ctrl+Shift+S alterna o sublinhado âmbar e persiste após reiniciar; clicar abre o léxico (M4a), com o interruptor ligado ou desligado.
+- [ ] Destaque das palavras de Jesus vem ligado, pode ser desligado no menu `Aa` e continua salvo após reiniciar; conferir contraste nos dois temas.
 - [ ] Ctrl+= aumenta, Ctrl+- diminui e Ctrl+0 restaura a fonte; os limites são 14 e 32 px e a preferência persiste após reiniciar.
 - [ ] Alternar escuro/claro/automático aplica o tema sem recarregar; automático acompanha a preferência do sistema. Texto, avisos e destaques permanecem legíveis.
 
@@ -73,6 +77,7 @@ Marque cada item à mão ao testar com `cargo tauri dev` (em `app/`) e módulos 
 - [ ] Dicionário protegido (Mickelson) nunca é usado nem listado como léxico.
 - [ ] Aba Comentário: selecionar outro versículo atualiza a lista em instantes (≈ 150 ms); entradas agrupadas por módulo, do mais específico ao mais amplo, com "Versículo 16", "Capítulo 3", "Introdução ao livro" etc.
 - [ ] Expandir uma entrada carrega o conteúdo; entradas longas mostram "Mostrar mais" e acrescentam a próxima página sem travar. Entrada RVF mostra "Formato ainda não suportado" só nela; as demais abrem normalmente.
+- [ ] Comentário longo pagina por até 60 parágrafos e aproximadamente 8.000 caracteres; uma página não duplica nem perde texto entre parágrafos.
 - [ ] Caixas de seleção "Comentários ativos": desmarcar um módulo some com suas entradas, marcar traz de volta; a escolha persiste ao reiniciar. Módulos protegidos não aparecem na lista.
 - [ ] Sem comentários instalados: mensagem com "Gerenciar pastas". Sem módulos ativos: "Nenhum comentário ativo…". Versículo sem comentário: "Nenhum comentário para este versículo nos módulos ativos".
 - [ ] Negrito, itálico, sublinhado, sobrescrito, parágrafos e links do RTF têm contraste legível nos dois temas; links de versículo/verbete se distinguem do texto.

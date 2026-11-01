@@ -69,6 +69,7 @@ Marque `[x]` ao concluir. Cada milestone só termina quando **todos** os critér
 ---
 
 ## M4 — Estudo: Strong, comentários, referências
+- [x] M4a.1 Auditoria de RTF, cabeçalho/controles de leitura, destaque de Jesus e limites de abertura/paginação; testes sintéticos e Vitest atualizados.
 - [x] M4.1 Strong clicável → aba Léxico do painel direito (o `StrongPopover` ficou fora; o painel abre com o clique ou Enter, mesmo com o interruptor de Strong desligado)
 - [x] M4.2 Comentários seguindo o versículo (específico → amplo), por módulo ativo, com conteúdo sob demanda e paginado
 - [ ] M4.3 Chips de referência cruzada com cartão de prévia no hover (M4b)

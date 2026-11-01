@@ -44,13 +44,14 @@ let world: World
 
 function baseSettings(overrides: Partial<AppSettings> = {}): AppSettings {
   return {
-    schema_version: 3,
+    schema_version: 4,
     module_folders: [],
     default_bible_id: 'bible',
     selected_bible_ids: ['bible'],
     interface_language: 'pt-BR',
     theme: 'dark',
     show_strong_numbers: false,
+    highlight_words_of_jesus: true,
     bible_font_size: 20,
     first_use_completed: true,
     last_passage: { book: 43, chapter: 3, verse: 16 },
@@ -197,6 +198,52 @@ afterEach(() => {
 const panelBody = (name: 'lexicon' | 'commentary') => document.getElementById(`study-panel-${name}`) as HTMLElement
 
 describe('painel de estudo no aplicativo', () => {
+  it('agrupa controles acessíveis e persiste o destaque das palavras de Jesus e o tema', async () => {
+    await mountApp()
+
+    expect(screen.getByText('+ Bíblia')).toBeTruthy()
+    const header = screen.getByRole('button', { name: 'Ativar Módulo bible (Alt+1)' })
+    expect(header.getAttribute('aria-pressed')).toBe('true')
+    expect(header.getAttribute('title')).toBe('Módulo bible')
+    expect(screen.getByRole('button', { name: 'Remover Módulo bible' })).toBeTruthy()
+
+    await fireEvent.click(screen.getByText('Aa'))
+    const settings = screen.getByRole('region', { name: 'Configurações da leitura' })
+    const highlight = within(settings).getByRole('checkbox', { name: 'Destacar palavras de Jesus' })
+    expect((highlight as HTMLInputElement).checked).toBe(true)
+    expect(within(settings).getByRole('checkbox', { name: /Mostrar números de Strong/ })).toBeTruthy()
+    const theme = within(settings).getByRole('combobox', { name: 'Tema' }) as HTMLSelectElement
+    expect(theme.value).toBe('dark')
+
+    await fireEvent.click(highlight)
+    await waitFor(() => expect(world.settings.highlight_words_of_jesus).toBe(false))
+    expect(document.documentElement.dataset.highlightJesus).toBe('false')
+
+    await fireEvent.change(theme, {
+      target: { value: 'light' }
+    })
+    await waitFor(() => expect(world.settings.theme).toBe('light'))
+  })
+
+  it('desabilita adicionar Bíblia na quarta coluna e informa o limite', async () => {
+    install({
+      settings: baseSettings({
+        selected_bible_ids: ['bible', 'bible-2', 'bible-3', 'bible-4']
+      }),
+      modules: [
+        module('bible', 'Bible'),
+        module('bible-2', 'Bible'),
+        module('bible-3', 'Bible'),
+        module('bible-4', 'Bible')
+      ]
+    })
+    await mountApp()
+
+    const add = screen.getByText('+ Bíblia').closest('button')
+    expect(add?.disabled).toBe(true)
+    expect(add?.getAttribute('title')).toContain('máximo é quatro')
+  })
+
   it('clicar numa palavra com Strong abre a aba Léxico, destaca a palavra e foca o painel', async () => {
     await mountApp()
     const word = document.querySelector('[data-verse="16"] button.strong-word') as HTMLButtonElement

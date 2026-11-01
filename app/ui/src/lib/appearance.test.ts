@@ -16,13 +16,14 @@ import {
 import { type AppSettings, type ModuleInfo } from './modules'
 
 const baseSettings = (): AppSettings => ({
-  schema_version: 2,
+  schema_version: 4,
   module_folders: [],
   default_bible_id: null,
   selected_bible_ids: [],
   interface_language: 'pt-BR',
   theme: 'dark',
   show_strong_numbers: false,
+  highlight_words_of_jesus: true,
   bible_font_size: 20,
   first_use_completed: false
 })
@@ -72,12 +73,13 @@ describe('reading appearance settings', () => {
     expect(resizeBibleFont(MAX_BIBLE_FONT_SIZE, 1)).toBe(MAX_BIBLE_FONT_SIZE)
     expect(resizeBibleFont(18, 0)).toBe(20)
     const settings = withSettings(baseSettings(), { bible_font_size: 22 })
-    expect(settings).toMatchObject({ schema_version: 2, bible_font_size: 22 })
+    expect(settings).toMatchObject({ schema_version: 4, bible_font_size: 22 })
   })
 
   it('persists Strong visibility and theme changes without losing other settings', () => {
     const settings = baseSettings()
     expect(withSettings(settings, { show_strong_numbers: true }).show_strong_numbers).toBe(true)
+    expect(withSettings(settings, { highlight_words_of_jesus: false }).highlight_words_of_jesus).toBe(false)
     expect(withSettings(settings, { theme: 'light' }).theme).toBe('light')
     expect(withSettings(settings, { theme: 'auto' }).theme).toBe('auto')
     applyTheme('light', document.documentElement)
@@ -151,6 +153,7 @@ describe('theme contrast tokens', () => {
     ]
     expect(css).toMatch(/\.strong-word:hover,\s*\.strong-word:focus-visible/)
     expect(css).toMatch(/\.strong-word\.show-strong\s*\{\s*text-decoration:\s*underline dashed/)
+    expect(css).toMatch(/\.words-of-jesus\s*\{\s*color:\s*var\(--jesus\)/)
     for (const theme of ['dark', 'light', 'auto-light']) {
       const tokens = blocks.get(theme)
       expect(tokens, `missing CSS tokens for ${theme}`).toBeDefined()

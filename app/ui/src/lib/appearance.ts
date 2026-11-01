@@ -58,5 +58,5 @@ export function contrastRatio(foreground: string, background: string): number {
 }
 
 export function withSettings(settings: AppSettings, changes: Partial<AppSettings>): AppSettings {
-  return { ...settings, ...changes, schema_version: 2 }
+  return { ...settings, ...changes, schema_version: 4 }
 }
