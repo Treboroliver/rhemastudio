@@ -1,14 +1,14 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! Modelo, armazenamento SQLite e exportação Markdown de sermões.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+mod error;
+mod export;
+mod model;
+mod store;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use error::{Result, SermonError};
+pub use export::export_markdown;
+pub use model::{
+    Block, MAX_BASE_TEXT_CHARS, MAX_BLOCK_BYTES, MAX_BLOCKS, MAX_TITLE_CHARS, Sermon,
+    SermonSummary, VersionInfo,
+};
+pub use store::{BACKUP_INTERVAL_MS, LATEST_SCHEMA, MAX_VERSIONS, SermonStore};

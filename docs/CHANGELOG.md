@@ -1,5 +1,10 @@
 # Changelog — RhemaStudio
 
+## [M6a] — 2026-11-02
+
+- `rhema-sermon`: modelo de blocos com limites, SQLite (WAL, migrações v1→v2), save atômico, cópias rotativas, restore, duplicar/arquivar/buscar, export Markdown.
+- Comandos Tauri `sermon_*` (erros com código estável) e exportação via diálogo nativo; `docs/PENDENCIAS.md`.
+
 ## [M1.5.1] — 2026-11-02
 
 - RVF: cabeçalhos com inteiros extras/tag entre aspas/espaço final (`-12`, `-2`, `-60`) reconhecidos; blob de célula descartado; UTF-16 validado com detector de caracteres suspeitos (fallback Windows-1252). Corrige a G3056 e o VidaNova; 0 entradas suspeitas.

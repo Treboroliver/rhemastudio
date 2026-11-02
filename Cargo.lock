@@ -123,6 +123,7 @@ dependencies = [
  "rhema-core",
  "rhema-library",
  "rhema-refs",
+ "rhema-sermon",
  "rhema-twformat",
  "serde",
  "serde_json",
@@ -2996,6 +2997,15 @@ version = "0.1.0"
 [[package]]
 name = "rhema-sermon"
 version = "0.1.0"
+dependencies = [
+ "rhema-core",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "uuid",
+]
 
 [[package]]
 name = "rhema-twformat"

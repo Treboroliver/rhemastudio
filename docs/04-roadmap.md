@@ -93,7 +93,7 @@ Marque `[x]` ao concluir. Cada milestone só termina quando **todos** os critér
 ---
 
 ## M6 — Sermão
-- [ ] M6.1 Modelo `rhema-sermon` + migrações + autosave atômico + backups rotativos
+- [x] M6.1 Modelo `rhema-sermon` + migrações + autosave atômico + backups rotativos
 - [ ] M6.2 Editor em blocos com menu `/` (versículo, léxico, nota, ilustração)
 - [ ] M6.3 Inserir seleção do texto bíblico com `Ctrl+Enter`
 - [ ] M6.4 Realces coloridos e anotações por versículo

@@ -13,6 +13,7 @@ use tauri_plugin_dialog::DialogExt;
 use thiserror::Error;
 
 mod reader;
+mod sermon;
 mod study;
 
 use reader::{ApiError, BookInfo, ChapterDto, READER_CACHE_CAPACITY, ReaderCache, ResolveDto};
@@ -583,6 +584,7 @@ pub fn run() {
             let settings = load_settings(&settings_path)
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
             let library = Library::new(app_data.join("library"));
+            app.manage(sermon::SermonState::open(&app_data));
             let cached = library.list_cached(&settings.module_folders);
             app.manage(AppState {
                 library,
@@ -608,7 +610,18 @@ pub fn run() {
             get_commentary_entry,
             resolve_reference,
             book_names,
-            set_last_passage
+            set_last_passage,
+            sermon::sermon_list,
+            sermon::sermon_create,
+            sermon::sermon_get,
+            sermon::sermon_save,
+            sermon::sermon_duplicate,
+            sermon::sermon_archive,
+            sermon::sermon_delete,
+            sermon::sermon_versions,
+            sermon::sermon_restore,
+            sermon::sermon_export_markdown,
+            sermon::sermon_save_export
         ])
         .run(tauri::generate_context!())
         .expect("error while building tauri application");

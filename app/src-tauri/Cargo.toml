@@ -21,6 +21,7 @@ tauri-build = { version = "2.7.3", features = [] }
 rhema-core = { path = "../../crates/rhema-core" }
 rhema-library = { path = "../../crates/rhema-library" }
 rhema-refs = { path = "../../crates/rhema-refs" }
+rhema-sermon = { path = "../../crates/rhema-sermon" }
 rhema-twformat = { path = "../../crates/rhema-twformat" }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }

@@ -1,6 +1,10 @@
-# Contexto — M1.5.1
+# Contexto — M6a
 
-Atualizado em 2026-11-02. M1.5.1 concluído (correções do RVF e espaço de nota na leitura); M4b continua fora do escopo.
+Atualizado em 2026-11-02. M6a concluído (backend do sermão, sem interface); M4b continua fora do escopo. Pendências conhecidas: `docs/PENDENCIAS.md`.
+
+- Sermão: crate `rhema-sermon` (modelo de blocos, SQLite WAL + `user_version` v2, versões rotativas: ≤1/min, 20 mais recentes, restore reversível, export Markdown). Comandos Tauri `sermon_*` em `app/src-tauri/src/sermon.rs`; banco `rhema.db` na pasta de dados do app; `sermon_save_export` usa o diálogo nativo. 1.000 blocos em release: salvar 16 ms, carregar 5 ms.
+
+## M1.5.1 (anterior)
 
 - RVF: cabeçalhos com campos extras, tag entre aspas e espaço final agora são reconhecidos; blobs de célula/tabela descartados; UTF-16 validado (>30% suspeitos → Windows-1252). 0 entradas suspeitas nos 4 módulos. Links: só `tw://bible` é de versículo; marcadores `-9 … 3/4` são estruturais.
 - UI: `FootnoteMarker` não gera mais espaço ao redor da nota (`textContent` == `plain_text`, teste `node-spacing.test.ts`).
