@@ -51,6 +51,7 @@ pub struct AppSettings {
     /// Comentários ativos. `None`: todos os comentários prontos.
     pub commentary_module_ids: Option<Vec<String>>,
     pub study_panel_open: bool,
+    pub study_panel_expanded: bool,
     pub highlight_words_of_jesus: bool,
 }
 
@@ -70,6 +71,7 @@ impl Default for AppSettings {
             lexicon_module_ids: None,
             commentary_module_ids: None,
             study_panel_open: true,
+            study_panel_expanded: false,
             highlight_words_of_jesus: true,
         }
     }

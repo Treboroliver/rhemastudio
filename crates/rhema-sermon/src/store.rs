@@ -129,17 +129,17 @@ impl SermonStore {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Busca por trecho do título, sem diferenciar maiúsculas de minúsculas.
+    /// Busca por trecho do título, sem diferenciar maiúsculas nem acentos.
     pub fn search_by_title(
         &self,
         query: &str,
         include_archived: bool,
     ) -> Result<Vec<SermonSummary>> {
-        let needle = query.trim().to_lowercase();
+        let needle = fold_text(query.trim());
         Ok(self
             .list(include_archived)?
             .into_iter()
-            .filter(|summary| needle.is_empty() || summary.title.to_lowercase().contains(&needle))
+            .filter(|summary| needle.is_empty() || fold_text(&summary.title).contains(&needle))
             .collect())
     }
 
@@ -314,6 +314,23 @@ fn migrate(conn: &mut Connection) -> Result<()> {
         tx.commit()?;
     }
     Ok(())
+}
+
+/// Minúsculas e sem acentos latinos comuns, para comparar títulos.
+fn fold_text(text: &str) -> String {
+    text.chars()
+        .flat_map(char::to_lowercase)
+        .map(|c| match c {
+            'á' | 'à' | 'â' | 'ã' | 'ä' | 'å' => 'a',
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'í' | 'ì' | 'î' | 'ï' => 'i',
+            'ó' | 'ò' | 'ô' | 'õ' | 'ö' => 'o',
+            'ú' | 'ù' | 'û' | 'ü' => 'u',
+            'ç' => 'c',
+            'ñ' => 'n',
+            other => other,
+        })
+        .collect()
 }
 
 fn content_differs(a: &Sermon, b: &Sermon) -> bool {
@@ -581,7 +598,13 @@ mod tests {
             f.store.search_by_title("  ", true).expect("buscar").len(),
             2
         );
-
+        assert_eq!(
+            f.store
+                .search_by_title("GRACA", false)
+                .expect("buscar")
+                .len(),
+            1
+        );
         f.store.unarchive(&b.id).expect("desarquivar");
         assert_eq!(f.store.list(false).expect("listar").len(), 2);
     }

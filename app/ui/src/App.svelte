@@ -52,7 +52,8 @@
     first_use_completed: false,
     lexicon_module_ids: null,
     commentary_module_ids: null,
-    study_panel_open: true
+    study_panel_open: true,
+    study_panel_expanded: false
   }
 
   let settings = $state<AppSettings>(defaults)
@@ -476,6 +477,14 @@
     await saveSettings({ commentary_module_ids: next })
   }
 
+  function isTextEntry(target: EventTarget | null): boolean {
+    return (
+      target instanceof HTMLElement &&
+      (target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLInputElement && !['checkbox', 'radio', 'button'].includes(target.type)))
+    )
+  }
+
   function onWindowKeydown(event: KeyboardEvent) {
     if (showSetup) return
     const key = event.key
@@ -483,6 +492,9 @@
       event.preventDefault()
       showCommand = !showCommand
     } else if (showCommand) {
+      return
+    } else if (isTextEntry(event.target) && key !== 'b' && key !== 'B' && !(event.ctrlKey && event.shiftKey)) {
+      // Em campos de texto, setas com Ctrl/Alt, Alt+número e zoom ficam com o campo (ex.: editor de sermão).
       return
     } else if (event.ctrlKey && !event.shiftKey && !event.altKey && key.toLowerCase() === 'b') {
       event.preventDefault()
@@ -641,13 +653,21 @@
       <StudyPanel
         bind:this={studyPanel}
         {t}
+        language={settings.interface_language}
+        {books}
         open={studyOpen}
+        expanded={settings.study_panel_expanded ?? false}
         tab={studyTab}
         {strongRequest}
         selection={verseSelection}
         commentaries={commentaryModules}
         activeCommentaryIds={activeCommentaryIds}
         onTab={(tab) => (studyTab = tab)}
+        onToggleExpand={() => {
+          const expanded = !(settings.study_panel_expanded ?? false)
+          settings = { ...settings, study_panel_expanded: expanded }
+          void saveSettings({ study_panel_expanded: expanded })
+        }}
         onToggleCommentary={toggleCommentary}
         onVerse={openVerse}
         onEntry={openEntry}

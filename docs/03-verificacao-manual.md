@@ -83,3 +83,12 @@ Marque cada item à mão ao testar com `cargo tauri dev` (em `app/`) e módulos 
 - [ ] Negrito, itálico, sublinhado, sobrescrito, parágrafos e links do RTF têm contraste legível nos dois temas; links de versículo/verbete se distinguem do texto.
 - [ ] Abas: ←/→ (e Home/End) trocam de aba; o foco vai ao painel ao abrir; janelas abaixo de 1100 px mostram o painel sobre a leitura.
 - [ ] Selecionar um versículo não pisca o capítulo nem tira o foco da palavra clicada.
+
+## Sermão (M6b-1)
+- [ ] Aba "Sermão": "Novo sermão" cria "Sermão sem título" e abre o editor com o foco no título.
+- [ ] Escreva título, texto base e alguns blocos; aguarde o indicador "Salvo", feche o app, abra de novo e confira que tudo está salvo.
+- [ ] Mover (botões e Alt+↑/↓), duplicar e remover blocos; "Bloco removido — Desfazer" some após 8 s.
+- [ ] "Exportar" abre o diálogo nativo; salve, abra o arquivo .md e confira o conteúdo; cancelar mostra mensagem de cancelado.
+- [ ] "Versões anteriores": Restaurar (com confirmação) recarrega o editor.
+- [ ] Busca por título ignora acentos e maiúsculas; arquivar/desarquivar e excluir (com confirmação) funcionam.
+- [ ] "Expandir" alterna 420 px ↔ 50% e persiste ao reiniciar; abaixo de 1100 px o painel cobre a leitura.

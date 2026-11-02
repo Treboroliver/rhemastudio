@@ -1,19 +1,24 @@
 <script lang="ts">
   import CommentaryTab from './CommentaryTab.svelte'
   import LexiconTab from './LexiconTab.svelte'
+  import SermonTab from './SermonTab.svelte'
   import type { ModuleInfo } from './modules'
   import type { NodeActions } from './reader'
   import type { StrongRequest, StudyTab } from './study'
 
   interface Props {
     t: (key: string, values?: Record<string, string | number>) => string
+    language?: string
+    books?: { number: number; abbreviation: string }[]
     open: boolean
+    expanded?: boolean
     tab: StudyTab
     strongRequest: StrongRequest | null
     selection: { book: number; chapter: number; verse: number } | null
     commentaries: ModuleInfo[]
     activeCommentaryIds: string[]
     onTab: (tab: StudyTab) => void
+    onToggleExpand?: () => void
     onToggleCommentary: (id: string, enabled: boolean) => void
     onVerse: NonNullable<NodeActions['onVerse']>
     onEntry: (id: string) => void
@@ -23,13 +28,17 @@
 
   let {
     t,
+    language = 'pt-BR',
+    books = [],
     open,
+    expanded = false,
     tab,
     strongRequest,
     selection,
     commentaries,
     activeCommentaryIds,
     onTab,
+    onToggleExpand = () => undefined,
     onToggleCommentary,
     onVerse,
     onEntry,
@@ -38,9 +47,19 @@
   }: Props = $props()
 
   // A aba Referências só aparece na M4b.
-  const tabs: StudyTab[] = ['lexicon', 'commentary']
+  const tabs: StudyTab[] = ['lexicon', 'commentary', 'sermon']
+  const tabKeys: Record<StudyTab, string> = {
+    lexicon: 'tabLexicon',
+    commentary: 'tabCommentary',
+    sermon: 'tabSermon'
+  }
   let root = $state<HTMLElement | null>(null)
   let tabButtons = $state<Record<string, HTMLButtonElement | undefined>>({})
+  // A aba Sermão só é montada na primeira vez que é aberta (evita consultar o banco sem necessidade).
+  let sermonVisited = $state(false)
+  $effect(() => {
+    if (tab === 'sermon') sermonVisited = true
+  })
 
   export function focusContent() {
     const panel = root?.querySelector<HTMLElement>(`#study-panel-${tab}`)
@@ -74,7 +93,7 @@
 
 <!-- O Esc vem dos controles internos e só devolve o foco; o aside não é interativo. -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<aside class="study-panel" aria-label={t('studyPanel')} hidden={!open} bind:this={root} onkeydown={onKeydown}>
+<aside class="study-panel" class:expanded aria-label={t('studyPanel')} hidden={!open} bind:this={root} onkeydown={onKeydown}>
   <div class="study-tabs" role="tablist" aria-label={t('studyTabs')}>
     {#each tabs as item (item)}
       <button
@@ -87,8 +106,15 @@
         bind:this={tabButtons[item]}
         onclick={() => onTab(item)}
         onkeydown={(event) => onTabKeydown(event, item)}
-      >{t(item === 'lexicon' ? 'tabLexicon' : 'tabCommentary')}</button>
+      >{t(tabKeys[item])}</button>
     {/each}
+    <button
+      type="button"
+      class="study-expand"
+      aria-pressed={expanded}
+      aria-label={expanded ? t('studyCollapse') : t('studyExpand')}
+      onclick={onToggleExpand}
+    >{expanded ? t('studyCollapse') : t('studyExpand')}</button>
   </div>
   <div
     class="study-body"
@@ -119,5 +145,17 @@
       {onEntry}
       {onManageFolders}
     />
+  </div>
+  <div
+    class="study-body"
+    role="tabpanel"
+    id="study-panel-sermon"
+    aria-labelledby="study-tab-sermon"
+    tabindex="-1"
+    hidden={tab !== 'sermon'}
+  >
+    {#if sermonVisited}
+      <SermonTab {t} {language} {books} active={open && tab === 'sermon'} />
+    {/if}
   </div>
 </aside>

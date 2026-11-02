@@ -1,5 +1,9 @@
 # Changelog — RhemaStudio
 
+## [M6b-1] — 2026-11-02
+
+- Aba Sermão: lista (busca sem acentos, arquivados, duplicar, excluir), editor de blocos com autosave em fila, desfazer remoção, versões e exportação Markdown; painel expansível.
+
 ## [M6a] — 2026-11-02
 
 - `rhema-sermon`: modelo de blocos com limites, SQLite (WAL, migrações v1→v2), save atômico, cópias rotativas, restore, duplicar/arquivar/buscar, export Markdown.

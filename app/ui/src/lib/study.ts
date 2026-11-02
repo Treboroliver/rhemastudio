@@ -64,7 +64,7 @@ export interface StrongRequest {
   seq: number
 }
 
-export type StudyTab = 'lexicon' | 'commentary'
+export type StudyTab = 'lexicon' | 'commentary' | 'sermon'
 
 /** Atraso para seguir o versículo selecionado sem consultar a cada tecla de seta. */
 export const COMMENTARY_FOLLOW_DELAY_MS = 150

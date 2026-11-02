@@ -37,6 +37,7 @@ export interface AppSettings {
   /** Comentários ativos; `null` ativa todos os comentários prontos. */
   commentary_module_ids?: string[] | null
   study_panel_open?: boolean
+  study_panel_expanded?: boolean
 }
 
 export function isReady(module: ModuleInfo): boolean {

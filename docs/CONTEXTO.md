@@ -1,7 +1,8 @@
-# Contexto — M6a
+# Contexto — M6b-1
 
 Atualizado em 2026-11-02. M6a concluído (backend do sermão, sem interface); M4b continua fora do escopo. Pendências conhecidas: `docs/PENDENCIAS.md`.
 
+- UI do sermão (M6b-1): aba Sermão no painel direito (lista, editor de blocos, autosave 500 ms com fila, Ctrl+S, gravação ao voltar/trocar de aba/fechar, versões, exportação Markdown). Botão Expandir (420 px ↔ 50%, `study_panel_expanded`). Código em `app/ui/src/lib/Sermon*.svelte` e `sermon.ts`. Busca por título sem acentos no backend. Inserção de versículo/léxico: M6b-2.
 - Sermão: crate `rhema-sermon` (modelo de blocos, SQLite WAL + `user_version` v2, versões rotativas: ≤1/min, 20 mais recentes, restore reversível, export Markdown). Comandos Tauri `sermon_*` em `app/src-tauri/src/sermon.rs`; banco `rhema.db` na pasta de dados do app; `sermon_save_export` usa o diálogo nativo. 1.000 blocos em release: salvar 16 ms, carregar 5 ms.
 
 ## M1.5.1 (anterior)
