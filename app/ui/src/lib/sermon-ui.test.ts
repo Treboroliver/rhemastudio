@@ -405,7 +405,8 @@ describe('editor', () => {
     expect(db.saves.at(-1)!.blocks[0]).toMatchObject({ markdown: 'um' })
   })
 
-  it('não passa de 1.000 blocos', { timeout: 120_000 }, async () => {
+  // Lento (renderiza 1.000 blocos); rode com RHEMA_SLOW_TESTS=1. O limite também é coberto em sermon-insert.test.ts.
+  it.skipIf(!process.env.RHEMA_SLOW_TESTS)('não passa de 1.000 blocos', { timeout: 120_000 }, async () => {
     seedA(Array.from({ length: MAX_BLOCKS }, (_, index) => text(`b${index}`, `n${index}`)))
     await openEditor()
     expect(fields()).toHaveLength(MAX_BLOCKS)

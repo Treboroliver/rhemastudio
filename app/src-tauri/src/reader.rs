@@ -344,7 +344,7 @@ impl ReaderCache {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    fn get_or_open(&self, module: &ModuleInfo) -> Result<Arc<OntReader>, ApiError> {
+    pub(crate) fn get_or_open(&self, module: &ModuleInfo) -> Result<Arc<OntReader>, ApiError> {
         {
             let mut entries = self.lock();
             if let Some(position) = entries.iter().position(|(id, _)| *id == module.id) {
@@ -368,13 +368,8 @@ impl ReaderCache {
     }
 }
 
-/// Lê um capítulo de uma Bíblia pronta. Módulos protegidos ou não prontos nunca são abertos.
-pub fn read_chapter(
-    cache: &ReaderCache,
-    module: &ModuleInfo,
-    book: u8,
-    chapter: u16,
-) -> Result<ChapterDto, ApiError> {
+/// Recusa módulos protegidos, não prontos ou que não são Bíblias, antes de abrir qualquer arquivo.
+pub fn ensure_readable_bible(module: &ModuleInfo) -> Result<(), ApiError> {
     match &module.state {
         ModuleState::Ready => {}
         ModuleState::Protected => {
@@ -396,6 +391,17 @@ pub fn read_chapter(
             "O módulo não é uma Bíblia.",
         ));
     }
+    Ok(())
+}
+
+/// Lê um capítulo de uma Bíblia pronta. Módulos protegidos ou não prontos nunca são abertos.
+pub fn read_chapter(
+    cache: &ReaderCache,
+    module: &ModuleInfo,
+    book: u8,
+    chapter: u16,
+) -> Result<ChapterDto, ApiError> {
+    ensure_readable_bible(module)?;
     let book = Book::from_number(book)
         .ok_or_else(|| ApiError::new("invalid_reference", format!("Livro inválido: {book}")))?;
     let Some(verse_count) = book.verses_in_chapter(chapter) else {

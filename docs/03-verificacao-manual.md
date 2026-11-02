@@ -92,3 +92,12 @@ Marque cada item à mão ao testar com `cargo tauri dev` (em `app/`) e módulos 
 - [ ] "Versões anteriores": Restaurar (com confirmação) recarrega o editor.
 - [ ] Busca por título ignora acentos e maiúsculas; arquivar/desarquivar e excluir (com confirmação) funcionam.
 - [ ] "Expandir" alterna 420 px ↔ 50% e persiste ao reiniciar; abaixo de 1100 px o painel cobre a leitura.
+
+## Sermão ligado à leitura (M6b-2)
+- [ ] Selecione um versículo e clique "Inserir no sermão" (ou Ctrl+Enter, inclusive com o cursor dentro do editor): sem sermão ativo aparece "Em qual sermão?" (foco no primeiro item, Esc cancela).
+- [ ] O aviso "Versículo inserido em «título»" some em 8 s; "Desfazer" remove o bloco. Com o editor aberto, o bloco entra depois do último bloco focado e a aba não muda.
+- [ ] Texto base vazio é preenchido com a referência; feche e reabra o app e confira que o versículo está salvo.
+- [ ] Em um bloco Texto vazio digite "/": menu com setas/Enter/Esc; "Versículo…" aceita "Jo 3:16-18" (ou "/Jo 3:16" direto), mostra prévia, erro simples em referência inválida e Tab troca de Bíblia.
+- [ ] Bloco Versículo: "Trocar tradução" atualiza o texto; "Ir para a leitura" navega e Alt+← volta; Bíblia removida da biblioteca mostra o texto salvo com a nota.
+- [ ] Léxico: abra um verbete, "Inserir no sermão"; clicar no título do bloco Léxico reabre o verbete.
+- [ ] Contraste e foco visível nos dois temas na janela, no menu "/" e no aviso.

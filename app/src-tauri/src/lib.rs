@@ -14,6 +14,7 @@ use thiserror::Error;
 
 mod reader;
 mod sermon;
+mod snapshot;
 mod study;
 
 use reader::{ApiError, BookInfo, ChapterDto, READER_CACHE_CAPACITY, ReaderCache, ResolveDto};
@@ -482,6 +483,41 @@ async fn lookup_strong(
 }
 
 #[tauri::command]
+async fn get_verse_snapshot(
+    module_id: String,
+    range: snapshot::RangeArg,
+    state: State<'_, AppState>,
+) -> Result<snapshot::VerseSnapshotDto, ApiError> {
+    let range = range.to_range()?;
+    let (catalog, settings) = study_snapshot(&state)?;
+    let module = catalog
+        .into_iter()
+        .find(|module| module.id == module_id)
+        .ok_or_else(|| ApiError::new("module_not_found", "Módulo não encontrado na biblioteca."))?;
+    let readers = Arc::clone(&state.readers);
+    tauri::async_runtime::spawn_blocking(move || {
+        snapshot::verse_snapshot(&readers, &module, range, &settings.interface_language)
+    })
+    .await
+    .map_err(|error| ApiError::internal(error.to_string()))?
+}
+
+#[tauri::command]
+async fn get_lexicon_snapshot(
+    strong_id: String,
+    state: State<'_, AppState>,
+) -> Result<snapshot::LexiconSnapshotDto, ApiError> {
+    let (catalog, settings) = study_snapshot(&state)?;
+    let lexicons = study::effective_lexicons(settings.lexicon_module_ids.as_deref(), &catalog);
+    let cache = Arc::clone(&state.study);
+    tauri::async_runtime::spawn_blocking(move || {
+        snapshot::lexicon_snapshot(&cache, &lexicons, &strong_id)
+    })
+    .await
+    .map_err(|error| ApiError::internal(error.to_string()))?
+}
+
+#[tauri::command]
 async fn get_commentary_index(
     book: u8,
     chapter: u16,
@@ -608,6 +644,8 @@ pub fn run() {
             get_chapter,
             get_chapters,
             lookup_strong,
+            get_verse_snapshot,
+            get_lexicon_snapshot,
             get_commentary_index,
             get_commentary_entry,
             resolve_reference,

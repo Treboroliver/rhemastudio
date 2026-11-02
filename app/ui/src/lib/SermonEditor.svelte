@@ -3,6 +3,11 @@
   import {
     asSermonError,
     blockBytes,
+    bookNumber,
+    getVerseSnapshot,
+    newBlockId,
+    verseBlockFromSnapshot,
+    type VerseSnapshotDto,
     blockText,
     convertBlock,
     createBlock,
@@ -31,16 +36,28 @@
     type SermonDto,
     type VersionInfoDto
   } from './sermon'
+  import { registerEditor, setActiveSermon, type InsertResult, type SermonBridge } from './sermonSession'
+  import VerseRefBox from './VerseRefBox.svelte'
 
   interface Props {
     t: (key: string, values?: Record<string, string | number>) => string
     language: string
     id: string
     books: { number: number; abbreviation: string }[]
+    bridge?: SermonBridge
     onBack: () => void
   }
 
-  let { t, language, id, books, onBack }: Props = $props()
+  let { t, language, id, books, bridge, onBack }: Props = $props()
+
+  type SlashState = { blockId: string; mode: 'menu' | 'verse'; query: string; index: number; dismissed: boolean }
+  let slash = $state<SlashState | null>(null)
+  let swapFor = $state<string | null>(null)
+  let swapError = $state<string | null>(null)
+  let lastFocusedBlockId: string | null = null
+  let markLoaded: () => void = () => {}
+  const loaded = new Promise<void>((resolve) => (markLoaded = resolve))
+  let unregister: (() => void) | undefined
 
   let sermon = $state<SermonDto | null>(null)
   let loadError = $state<string | null>(null)
@@ -75,16 +92,21 @@
   const kindLabel = (kind: string) => t(`sermonKind_${kind}`)
 
   onMount(async () => {
+    unregister = registerEditor({ id, insert: insertFromOutside })
     try {
       sermon = await sermonGet(id)
+      setActiveSermon({ id, title: sermon.title })
+      markLoaded()
       await tick()
       root?.querySelector<HTMLElement>('[data-focus="title"]')?.focus()
     } catch (cause) {
       loadError = asSermonError(cause).code === 'sermon_unavailable' ? t('sermonUnavailable') : t('sermonLoadError')
+      markLoaded()
     }
   })
 
   onDestroy(() => {
+    unregister?.()
     clearTimeout(undoTimer)
     if (queue.pending) void queue.flush()
   })
@@ -92,6 +114,179 @@
   function touch() {
     notice = null
     queue.touch()
+  }
+
+  /** Insere depois do último bloco focado (ou no fim), sem roubar o foco. */
+  async function insertFromOutside(block: Block, baseText?: string): Promise<InsertResult> {
+    await loaded
+    if (!sermon) throw { code: 'sermon_unavailable', message: 'editor indisponível' }
+    if (sermon.blocks.length >= MAX_BLOCKS) throw { code: 'sermon_block_limit', message: 'limite de blocos' }
+    const found = lastFocusedBlockId ? indexOfBlock(lastFocusedBlockId) : -1
+    const at = found >= 0 ? found + 1 : sermon.blocks.length
+    const previousBase = sermon.base_text
+    const fillBase = !!baseText && !previousBase.trim()
+    sermon.blocks = insertItem(sermon.blocks, at, block)
+    if (fillBase) sermon.base_text = (baseText as string).slice(0, MAX_BASE_TEXT_CHARS)
+    const filled = sermon.base_text
+    touch()
+    return {
+      title: sermon.title,
+      undo: () => {
+        if (!sermon) return
+        sermon.blocks = sermon.blocks.filter((candidate) => candidate.id !== block.id)
+        if (fillBase && sermon.base_text === filled) sermon.base_text = previousBase
+        touch()
+      }
+    }
+  }
+
+  function onBlockFocusIn(blockId: string) {
+    lastFocusedBlockId = blockId
+  }
+
+  // Menu "/" ------------------------------------------------------------
+  const slashItems = ['verse', 'heading', 'note', 'illustration'] as const
+  const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  const slashLabel = (item: string) => (item === 'verse' ? t('sermonSlashVerse') : kindLabel(item))
+
+  function detectSlash(value: string, caret: number): string | null {
+    const start = value.lastIndexOf('\n', caret - 1) + 1
+    const line = value.slice(start, caret)
+    return line.startsWith('/') ? line.slice(1) : null
+  }
+
+  const slashMatches = $derived.by(() => {
+    if (!slash) return [] as string[]
+    const query = normalize(slash.query)
+    return slashItems.filter((item) => normalize(slashLabel(item)).startsWith(query))
+  })
+
+  function slashStart(value: string, caret: number) {
+    return value.lastIndexOf('\n', caret - 1) + 1
+  }
+
+  function updateSlash(blockId: string, element: HTMLTextAreaElement) {
+    const block = sermon?.blocks[indexOfBlock(blockId)]
+    if (!block || block.type !== 'text') {
+      slash = null
+      return
+    }
+    const query = detectSlash(element.value, element.selectionStart ?? element.value.length)
+    if (query === null) {
+      slash = null
+      return
+    }
+    if (slash?.mode === 'verse') return
+    slash = { blockId, mode: 'menu', query, index: 0, dismissed: false }
+    if (query && !slashMatches.length) slash = { ...slash, mode: 'verse' }
+  }
+
+  function removeSlashLine(blockId: string): string {
+    const index = indexOfBlock(blockId)
+    const block = sermon?.blocks[index]
+    if (!sermon || !block || block.type !== 'text') return ''
+    const element = root?.querySelector<HTMLTextAreaElement>(`[data-block-id="${blockId}"] textarea`)
+    const value = block.markdown
+    const caret = element?.selectionStart ?? value.length
+    const start = slashStart(value, caret)
+    let end = value.indexOf('\n', caret)
+    if (end < 0) end = value.length
+    return (value.slice(0, start) + value.slice(end)).replace(/\n$/, '')
+  }
+
+  function chooseSlash(item: string) {
+    if (!slash || !sermon) return
+    const blockId = slash.blockId
+    if (item === 'verse') {
+      slash = { ...slash, mode: 'verse' }
+      return
+    }
+    const index = indexOfBlock(blockId)
+    const rest = removeSlashLine(blockId)
+    slash = null
+    if (index < 0) return
+    if (!rest.trim()) {
+      sermon.blocks[index] = convertBlock(sermon.blocks[index], item as EditableKind)
+      touch()
+      focusBlock(blockId, 'field')
+    } else {
+      sermon.blocks[index] = withText(sermon.blocks[index], rest)
+      addBlock(item as EditableKind, index + 1)
+    }
+  }
+
+  function onSlashKeydown(event: KeyboardEvent, blockId: string) {
+    if (!slash || slash.blockId !== blockId || slash.mode !== 'menu' || event.altKey) return
+    const count = slashMatches.length
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      if (count) slash.index = (slash.index + (event.key === 'ArrowDown' ? 1 : count - 1)) % count
+    } else if (event.key === 'Enter') {
+      event.preventDefault()
+      const item = slashMatches[slash.index]
+      if (item) chooseSlash(item)
+    } else if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      slash = null
+    }
+  }
+
+  function insertVerseFromBox(snapshot: VerseSnapshotDto, moduleId: string) {
+    if (!sermon || !slash) return
+    const blockId = slash.blockId
+    const index = indexOfBlock(blockId)
+    const rest = removeSlashLine(blockId)
+    slash = null
+    if (index < 0) return
+    const block = verseBlockFromSnapshot(snapshot, moduleId)
+    if (!rest.trim()) {
+      sermon.blocks[index] = block
+    } else {
+      sermon.blocks[index] = withText(sermon.blocks[index], rest)
+      if (sermon.blocks.length >= MAX_BLOCKS) {
+        notice = t('sermonLimitBlocks', { max: MAX_BLOCKS })
+        return
+      }
+      sermon.blocks = insertItem(sermon.blocks, index + 1, block)
+    }
+    if (!sermon.base_text.trim()) sermon.base_text = snapshot.reference_label.slice(0, MAX_BASE_TEXT_CHARS)
+    touch()
+    focusBlock(block.id, 'field')
+  }
+
+  function cancelVerseBox() {
+    if (!slash) return
+    const blockId = slash.blockId
+    slash = null
+    focusBlock(blockId, 'field')
+  }
+
+  // Bloco Versículo --------------------------------------------------------
+  const isInstalled = (moduleId: string) => !bridge || bridge.bibles.some((bible) => bible.id === moduleId)
+
+  async function swapTranslation(blockId: string, moduleId: string) {
+    swapFor = null
+    swapError = null
+    const index = indexOfBlock(blockId)
+    const block = sermon?.blocks[index]
+    if (!sermon || !block || block.type !== 'verse') return
+    try {
+      const snapshot = await getVerseSnapshot(moduleId, $state.snapshot(block.range) as never)
+      const now = indexOfBlock(blockId)
+      if (now < 0 || !sermon) return
+      sermon.blocks[now] = { ...block, module_id: moduleId, module_abbr: snapshot.module_abbr, snapshot: snapshot.text }
+      touch()
+    } catch {
+      swapError = t('sermonSwapError')
+    }
+    focusBlock(blockId, 'swap')
+  }
+
+  function goToReading(block: Extract<Block, { type: 'verse' }>) {
+    const book = bookNumber(String(block.range.start.book))
+    if (!bridge || !book) return
+    bridge.goToPassage({ book, chapter: block.range.start.chapter, verse: block.range.start.verse })
   }
 
   function indexOfBlock(blockId: string) {
@@ -117,6 +312,7 @@
   function onTitleInput(event: Event) {
     if (!sermon) return
     sermon.title = (event.currentTarget as HTMLInputElement).value
+    setActiveSermon({ id, title: sermon.title })
     touch()
   }
 
@@ -140,6 +336,7 @@
     }
     sermon.blocks[index] = candidate
     touch()
+    updateSlash(blockId, element)
   }
 
   function onKindChange(blockId: string, event: Event) {
@@ -454,7 +651,7 @@
       {#each sermon.blocks as block, index (block.id)}
         <!-- O Alt+↑/↓ chega dos controles do bloco; o item da lista não é interativo. -->
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-        <li class="sermon-block" data-block-id={block.id} onkeydown={(event) => onBlockKeydown(event, block.id)}>
+        <li class="sermon-block" data-block-id={block.id} onfocusin={() => onBlockFocusIn(block.id)} onkeydown={(event) => onBlockKeydown(event, block.id)}>
           <div class="sermon-block-head">
             {#if isEditable(block)}
               <select
@@ -494,8 +691,43 @@
           {#if block.type === 'verse'}
             <p class="sermon-ref" data-focus="field" tabindex="-1">{referenceLabel(block.range, books)} · {block.module_abbr}</p>
             <p class="sermon-snapshot">{block.snapshot}</p>
+            {#if !isInstalled(block.module_id)}
+              <p class="panel-note" role="status">{t('sermonVerseNotInstalled')}</p>
+            {/if}
+            {#if bridge}
+              <div class="sermon-verse-actions">
+                <button
+                  type="button"
+                  class="compact-control"
+                  data-focus="swap"
+                  aria-haspopup="menu"
+                  aria-expanded={swapFor === block.id}
+                  disabled={!bridge.bibles.length}
+                  onclick={() => (swapFor = swapFor === block.id ? null : block.id)}
+                >{t('sermonSwapTranslation')}</button>
+                <button type="button" class="compact-control" data-focus="goto" onclick={() => goToReading(block)}>{t('sermonGoToReading')}</button>
+              </div>
+              {#if swapFor === block.id}
+                <div class="sermon-menu-list sermon-swap-list" role="menu" aria-label={t('sermonSwapTranslation')}>
+                  {#each bridge.bibles as bible (bible.id)}
+                    <button type="button" role="menuitem" onclick={() => void swapTranslation(block.id, bible.id)}>{bible.abbreviation} — {bible.title}</button>
+                  {/each}
+                </div>
+              {/if}
+              {#if swapError}<p class="sermon-verse-error" role="alert">{swapError}</p>{/if}
+            {/if}
           {:else if block.type === 'lexicon'}
-            <p class="sermon-ref" data-focus="field" tabindex="-1">{block.strong_id} — {block.title}</p>
+            {#if bridge}
+              <button
+                type="button"
+                class="sermon-ref sermon-link"
+                data-focus="field"
+                title={t('sermonOpenEntry')}
+                onclick={() => bridge.openEntry(block.strong_id)}
+              >{block.strong_id} — {block.title}</button>
+            {:else}
+              <p class="sermon-ref" data-focus="field" tabindex="-1">{block.strong_id} — {block.title}</p>
+            {/if}
             <p class="sermon-snapshot">{block.snapshot}</p>
           {:else}
             <textarea
@@ -507,7 +739,37 @@
               value={blockText(block)}
               use:autosize={blockText(block)}
               oninput={(event) => onBlockInput(block.id, event)}
+              onkeydown={(event) => onSlashKeydown(event, block.id)}
             ></textarea>
+            {#if slash && slash.blockId === block.id}
+              {#if slash.mode === 'menu'}
+                <div class="sermon-menu-list sermon-slash" role="listbox" aria-label={t('sermonSlashLabel')}>
+                  {#each slashMatches as item, position (item)}
+                    <button
+                      type="button"
+                      role="option"
+                      tabindex="-1"
+                      aria-selected={position === slash.index}
+                      class:active={position === slash.index}
+                      onmousedown={(event) => event.preventDefault()}
+                      onclick={() => chooseSlash(item)}
+                    >{slashLabel(item)}</button>
+                  {/each}
+                </div>
+              {:else if bridge}
+                <VerseRefBox
+                  {t}
+                  {language}
+                  bibles={bridge.bibles}
+                  activeBibleId={bridge.activeBibleId}
+                  initialText={slash.query}
+                  onInsert={insertVerseFromBox}
+                  onCancel={cancelVerseBox}
+                />
+              {:else}
+                <p class="panel-note">{t('sermonVerseNoBible')}</p>
+              {/if}
+            {/if}
           {/if}
           {@render addSlot(index + 1)}
         </li>

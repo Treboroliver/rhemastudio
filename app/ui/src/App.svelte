@@ -9,6 +9,22 @@
   import ParallelBiblePane from './lib/ParallelBiblePane.svelte'
   import StudyPanel from './lib/StudyPanel.svelte'
   import CommandBar from './lib/CommandBar.svelte'
+  import SermonPicker from './lib/SermonPicker.svelte'
+  import {
+    getLexiconSnapshot,
+    getVerseSnapshot,
+    lexiconBlockFromSnapshot,
+    UNDO_WINDOW_MS,
+    verseBlockFromSnapshot,
+    type Block
+  } from './lib/sermon'
+  import {
+    getActiveSermon,
+    insertBlockIntoSermon,
+    setActiveSermon,
+    type InsertResult,
+    type SermonBridge
+  } from './lib/sermonSession'
   import {
     activeCommentaryIds as resolveActiveCommentaryIds,
     isReady,
@@ -469,6 +485,129 @@
     navigate({ book: target.book, chapter: target.chapter, verse: target.verse })
   }
 
+  // Inserção no sermão ------------------------------------------------------
+  let pickerRequest = $state<((id: string | null) => void) | null>(null)
+  let sermonToast = $state<{ message: string; error: boolean; undo: (() => Promise<void> | void) | null } | null>(null)
+  let toastTimer: ReturnType<typeof setTimeout> | undefined
+  let inserting = false
+
+  const sermonBridge = $derived<SermonBridge>({
+    bibles: readyBibles.map((module) => ({
+      id: module.id,
+      abbreviation: module.abbreviation ?? module.title,
+      title: module.title
+    })),
+    activeBibleId: activeBibleId ?? parallelBibles[0]?.id ?? null,
+    goToPassage: openVerse,
+    openEntry
+  })
+
+  function showToast(message: string, error = false, undo: (() => Promise<void> | void) | null = null) {
+    clearTimeout(toastTimer)
+    sermonToast = { message, error, undo }
+    toastTimer = setTimeout(() => (sermonToast = null), error ? 6000 : UNDO_WINDOW_MS)
+  }
+
+  async function undoToast() {
+    const current = sermonToast
+    sermonToast = null
+    clearTimeout(toastTimer)
+    try {
+      await current?.undo?.()
+    } catch {
+      showToast(t('sermonInsertUndoError'), true)
+    }
+  }
+
+  function askSermon(): Promise<string | null> {
+    return new Promise((resolve) => {
+      pickerRequest = resolve
+    })
+  }
+
+  function answerPicker(id: string | null) {
+    const resolve = pickerRequest
+    pickerRequest = null
+    resolve?.(id)
+  }
+
+  function insertErrorMessage(cause: unknown): string {
+    const code = (cause as { code?: string } | null)?.code
+    switch (code) {
+      case 'sermon_block_limit':
+        return t('sermonLimitBlocks', { max: 1000 })
+      case 'sermon_unavailable':
+        return t('sermonUnavailable')
+      case 'range_too_large':
+        return t('sermonVerseTooLong')
+      case 'module_protected':
+        return t('errorProtected')
+      case 'book_not_in_module':
+        return t('sermonVerseBookMissing')
+      case 'verse_not_found':
+        return t('sermonVerseMissing')
+      case 'no_lexicon_installed':
+      case 'entry_not_found':
+        return t('sermonLexiconError')
+      default:
+        return t('sermonInsertError')
+    }
+  }
+
+  async function insertIntoSermon(
+    build: () => Promise<{ block: Block; baseText?: string; message: (title: string) => string }>
+  ) {
+    if (inserting) return
+    inserting = true
+    try {
+      let target = getActiveSermon()
+      if (!target) {
+        const picked = await askSermon()
+        if (!picked) return
+        target = getActiveSermon()?.id === picked ? getActiveSermon() : { id: picked, title: '' }
+      }
+      const { block, baseText, message } = await build()
+      let result: InsertResult
+      try {
+        result = await insertBlockIntoSermon(target!.id, block, baseText)
+      } catch (cause) {
+        if ((cause as { code?: string } | null)?.code === 'sermon_not_found') {
+          setActiveSermon(null)
+        }
+        throw cause
+      }
+      showToast(message(result.title || target!.title), false, result.undo)
+    } catch (cause) {
+      showToast(insertErrorMessage(cause), true)
+    } finally {
+      inserting = false
+    }
+  }
+
+  function insertSelectedVerse() {
+    const moduleId = activeBibleId ?? parallelBibles[0]?.id
+    const point = verseSelection
+    if (!moduleId || !point) return
+    void insertIntoSermon(async () => {
+      const snapshot = await getVerseSnapshot(moduleId, { start: point, end: point })
+      return {
+        block: verseBlockFromSnapshot(snapshot, moduleId),
+        baseText: snapshot.reference_label,
+        message: (title) => t('sermonVerseInserted', { title })
+      }
+    })
+  }
+
+  function insertLexicon(key: string) {
+    void insertIntoSermon(async () => {
+      const snapshot = await getLexiconSnapshot(key)
+      return {
+        block: lexiconBlockFromSnapshot(snapshot),
+        message: (title) => t('sermonLexiconInserted', { title })
+      }
+    })
+  }
+
   async function toggleCommentary(id: string, enabled: boolean) {
     const wanted = new Set(activeCommentaryIds)
     if (enabled) wanted.add(id)
@@ -491,8 +630,13 @@
     if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === 'k') {
       event.preventDefault()
       showCommand = !showCommand
-    } else if (showCommand) {
+    } else if (showCommand || pickerRequest) {
       return
+    } else if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && key === 'Enter') {
+      if (verseSelection) {
+        event.preventDefault()
+        insertSelectedVerse()
+      }
     } else if (isTextEntry(event.target) && key !== 'b' && key !== 'B' && !(event.ctrlKey && event.shiftKey)) {
       // Em campos de texto, setas com Ctrl/Alt, Alt+número e zoom ficam com o campo (ex.: editor de sermão).
       return
@@ -648,6 +792,7 @@
           onToggleJesusWords={() => void saveSettings({ highlight_words_of_jesus: !settings.highlight_words_of_jesus })}
           onThemeChange={(theme) => void saveSettings({ theme })}
           onStrong={openStrong}
+          onInsert={insertSelectedVerse}
         />
       {/if}
       <StudyPanel
@@ -673,8 +818,21 @@
         onEntry={openEntry}
         onManageFolders={manageFolders}
         onEscape={returnFocus}
+        bridge={sermonBridge}
+        onInsertLexicon={insertLexicon}
       />
     </main>
+    {#if pickerRequest}
+      <SermonPicker {t} onPick={answerPicker} onCancel={() => answerPicker(null)} />
+    {/if}
+    {#if sermonToast}
+      <div class="sermon-toast" class:error={sermonToast.error} role={sermonToast.error ? 'alert' : 'status'}>
+        <span>{sermonToast.message}</span>
+        {#if sermonToast.undo}
+          <button type="button" class="compact-control" onclick={() => void undoToast()}>{t('sermonUndo')}</button>
+        {/if}
+      </div>
+    {/if}
     {#if showCommand}
       <CommandBar
         {t}

@@ -12,3 +12,5 @@
 - Estilos de parágrafo (alinhamento) do RVF não aproveitados.
 - Módulos protegidos (acf2007, LTT2009, LTT2015, Mickelson) nunca serão lidos, por política.
 - Nome do produto (RhemaStudio) precisa de checagem de marca.
+- Ctrl+Enter insere só um versículo (a faixa selecionada ainda não existe); "/Jo 3:16-18" usa a primeira faixa.
+- Teste de 1.000 blocos da UI é lento e fica fora da suíte padrão (`RHEMA_SLOW_TESTS=1`).

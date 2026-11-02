@@ -13,6 +13,7 @@
     loading: boolean
     error: ApiError | null
     selectedVerse: number | null
+    onInsert?: () => void
     activeBibleId: string | null
     canPrevious: boolean
     canNext: boolean
@@ -43,6 +44,7 @@
     loading,
     error,
     selectedVerse,
+    onInsert,
     activeBibleId,
     canPrevious,
     canNext,
@@ -176,6 +178,9 @@
       <button class="nav-button" aria-label={t('nextChapter')} title={`${t('nextChapter')} (Ctrl+→)`} disabled={!canNext} onclick={onNext}>›</button>
     </div>
     <div class="reading-controls">
+      {#if onInsert && selectedVerse !== null}
+        <button type="button" class="compact-control insert-verse" title={`${t('insertIntoSermon')} (Ctrl+Enter)`} onclick={onInsert}>{t('insertIntoSermon')}</button>
+      {/if}
       <details class="reading-menu">
         <summary class="compact-control settings-trigger" aria-label={t('readingSettings')} title={t('readingSettings')}>Aa</summary>
         <div class="reading-menu-popover" role="region" aria-label={t('readingSettings')}>

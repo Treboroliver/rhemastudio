@@ -1,5 +1,9 @@
 # Changelog — RhemaStudio
 
+## [M6b-2] — 2026-11-02
+
+- Inserir versículo (botão/Ctrl+Enter) e verbete no sermão ativo, com Desfazer; menu "/" com referência e prévia; bloco Versículo com trocar tradução e ir para a leitura; snapshots no backend.
+
 ## [M6b-1] — 2026-11-02
 
 - Aba Sermão: lista (busca sem acentos, arquivados, duplicar, excluir), editor de blocos com autosave em fila, desfazer remoção, versões e exportação Markdown; painel expansível.

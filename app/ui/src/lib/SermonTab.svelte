@@ -3,6 +3,7 @@
   import SermonEditor from './SermonEditor.svelte'
   import SermonList from './SermonList.svelte'
   import { CLOSE_FLUSH_TIMEOUT_MS } from './sermon'
+  import type { SermonBridge } from './sermonSession'
 
   interface Props {
     t: (key: string, values?: Record<string, string | number>) => string
@@ -10,9 +11,10 @@
     books: { number: number; abbreviation: string }[]
     /** A aba está visível; ao deixar de estar, grava o que estiver pendente. */
     active: boolean
+    bridge?: SermonBridge
   }
 
-  let { t, language, books, active }: Props = $props()
+  let { t, language, books, active, bridge }: Props = $props()
 
   let openId = $state<string | null>(null)
   let editor = $state<ReturnType<typeof SermonEditor> | null>(null)
@@ -54,7 +56,7 @@
 
 {#if openId}
   {#key openId}
-    <SermonEditor bind:this={editor} {t} {language} {books} id={openId} onBack={() => ((openId = null), (editor = null))} />
+    <SermonEditor bind:this={editor} {t} {language} {books} {bridge} id={openId} onBack={() => ((openId = null), (editor = null))} />
   {/key}
 {:else}
   <SermonList {t} {language} onOpen={(id) => (openId = id)} />

@@ -9,6 +9,7 @@
     request: StrongRequest | null
     onVerse: (target: { book: number; chapter: number; verse: number }) => void
     onManageFolders: () => void
+    onInsert?: (key: string) => void
   }
 
   interface Visit {
@@ -18,7 +19,7 @@
 
   const HISTORY_LIMIT = 50
 
-  let { t, request, onVerse, onManageFolders }: Props = $props()
+  let { t, request, onVerse, onManageFolders, onInsert }: Props = $props()
 
   let visits = $state<Visit[]>([])
   let entry = $state<LexiconEntryDto | null>(null)
@@ -118,6 +119,9 @@
           <h3>{entry.title}</h3>
           {#if entry.original_word}<p class="original-word" dir="auto">{entry.original_word}</p>{/if}
           <p class="panel-note">{entry.module_title}</p>
+          {#if onInsert}
+            <button type="button" class="compact-control" data-focus="insert-lexicon" onclick={() => onInsert(entry!.key)}>{t('insertIntoSermon')}</button>
+          {/if}
         </header>
         {#if entry.degraded}<p class="panel-note" role="status">{t('contentDegraded')}</p>{/if}
         <RichContent nodes={entry.nodes} {t} {actions} />

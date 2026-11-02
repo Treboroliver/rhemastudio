@@ -91,6 +91,52 @@ export const sermonRestore = (id: string, versionId: number) =>
   invoke<SermonDto>('sermon_restore', { id, versionId })
 export const sermonSaveExport = (id: string) => invoke<string | null>('sermon_save_export', { id })
 
+export type RangeArg = {
+  start: { book: string | number; chapter: number; verse: number }
+  end: { book: string | number; chapter: number; verse: number }
+}
+
+export interface VerseSnapshotDto {
+  reference_label: string
+  module_abbr: string
+  text: string
+  range: { start: VerseRefDto; end: VerseRefDto }
+}
+
+export interface LexiconSnapshotDto {
+  strong_id: string
+  module_id: string
+  title: string
+  text: string
+}
+
+export const getVerseSnapshot = (moduleId: string, range: RangeArg) =>
+  invoke<VerseSnapshotDto>('get_verse_snapshot', { moduleId, range })
+export const getLexiconSnapshot = (strongId: string) =>
+  invoke<LexiconSnapshotDto>('get_lexicon_snapshot', { strongId })
+
+export function verseBlockFromSnapshot(snapshot: VerseSnapshotDto, moduleId: string, id = newBlockId()): Block {
+  return {
+    type: 'verse',
+    id,
+    range: snapshot.range,
+    module_id: moduleId,
+    module_abbr: snapshot.module_abbr,
+    snapshot: snapshot.text
+  }
+}
+
+export function lexiconBlockFromSnapshot(snapshot: LexiconSnapshotDto): Block {
+  return {
+    type: 'lexicon',
+    id: newBlockId(),
+    strong_id: snapshot.strong_id,
+    module_id: snapshot.module_id,
+    title: snapshot.title,
+    snapshot: snapshot.text
+  }
+}
+
 let idCounter = 0
 export function newBlockId(): string {
   const cryptoApi = globalThis.crypto
@@ -163,6 +209,11 @@ const bookVariants = [
   'Philemon', 'Hebrews', 'James', 'FirstPeter', 'SecondPeter', 'FirstJohn', 'SecondJohn', 'ThirdJohn',
   'Jude', 'Revelation'
 ]
+
+/** Número (1–66) do livro a partir do nome da variante salvo nos blocos; 0 se desconhecido. */
+export function bookNumber(name: string): number {
+  return bookVariants.indexOf(name) + 1
+}
 
 /** Referência legível ("Abr 1:2-3") a partir do intervalo salvo e da lista de livros da interface. */
 export function referenceLabel(

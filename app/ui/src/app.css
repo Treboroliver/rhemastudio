@@ -458,6 +458,21 @@ textarea:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; 
 .sermon-textarea.heading-1 { font: 600 18px "Source Serif 4", serif; }
 .sermon-ref { margin: 0 0 4px; color: var(--accent-text); font: 600 15px "IBM Plex Sans", sans-serif; }
 .sermon-snapshot { margin: 0; color: var(--text); font: 400 15px/1.6 "Source Serif 4", serif; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sermon-link { display: block; padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; text-decoration: underline; }
+.sermon-verse-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.sermon-verse-box { margin-top: 8px; padding: 10px; border: 1px solid var(--active-border); border-radius: 8px; background: var(--card); }
+.sermon-verse-box .sermon-input { width: 100%; }
+.sermon-verse-error { margin: 6px 0 0; color: var(--error); font-size: 13px; }
+.sermon-verse-preview { margin-top: 8px; }
+.sermon-slash { position: static; margin-top: 4px; }
+.sermon-slash button.active, .sermon-swap-list button:focus-visible { background: var(--selected-bg); }
+.sermon-picker { position: fixed; z-index: 100; top: 20vh; left: 50%; transform: translateX(-50%); width: min(420px, calc(100vw - 32px)); padding: 16px; border: 1px solid var(--active-border); border-radius: 10px; background: var(--panel); color: var(--text-strong); box-shadow: 0 10px 30px rgba(0, 0, 0, .35); }
+.sermon-picker h2 { margin: 0 0 10px; font-size: 16px; }
+.sermon-picker ul { margin: 0 0 10px; padding: 0; list-style: none; display: grid; gap: 4px; }
+.sermon-picker-item { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--text-strong); font-size: 14px; text-align: left; cursor: pointer; }
+.sermon-picker-item:hover { background: var(--hover-bg); }
+.sermon-toast { position: fixed; z-index: 95; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 10px; max-width: min(440px, calc(100vw - 32px)); padding: 10px 14px; border: 1px solid var(--active-border); border-radius: 8px; background: var(--selected-bg); color: var(--text-strong); font-size: 13px; box-shadow: 0 6px 20px rgba(0, 0, 0, .3); }
+.sermon-toast.error { border-color: var(--error-border); background: var(--error-bg); color: var(--error); }
 @media (max-width: 700px) {
   .topbar { padding: 0 13px; }
   .library-panel { width: 180px; flex-basis: 180px; }

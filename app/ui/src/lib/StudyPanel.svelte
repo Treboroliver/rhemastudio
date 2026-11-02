@@ -2,6 +2,7 @@
   import CommentaryTab from './CommentaryTab.svelte'
   import LexiconTab from './LexiconTab.svelte'
   import SermonTab from './SermonTab.svelte'
+  import type { SermonBridge } from './sermonSession'
   import type { ModuleInfo } from './modules'
   import type { NodeActions } from './reader'
   import type { StrongRequest, StudyTab } from './study'
@@ -24,6 +25,8 @@
     onEntry: (id: string) => void
     onManageFolders: () => void
     onEscape: () => void
+    bridge?: SermonBridge
+    onInsertLexicon?: (key: string) => void
   }
 
   let {
@@ -43,7 +46,9 @@
     onVerse,
     onEntry,
     onManageFolders,
-    onEscape
+    onEscape,
+    bridge,
+    onInsertLexicon
   }: Props = $props()
 
   // A aba Referências só aparece na M4b.
@@ -124,7 +129,7 @@
     tabindex="-1"
     hidden={tab !== 'lexicon'}
   >
-    <LexiconTab {t} request={strongRequest} {onVerse} {onManageFolders} />
+    <LexiconTab {t} request={strongRequest} {onVerse} {onManageFolders} onInsert={onInsertLexicon} />
   </div>
   <div
     class="study-body"
@@ -155,7 +160,7 @@
     hidden={tab !== 'sermon'}
   >
     {#if sermonVisited}
-      <SermonTab {t} {language} {books} active={open && tab === 'sermon'} />
+      <SermonTab {t} {language} {books} {bridge} active={open && tab === 'sermon'} />
     {/if}
   </div>
 </aside>

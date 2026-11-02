@@ -94,8 +94,8 @@ Marque `[x]` ao concluir. Cada milestone só termina quando **todos** os critér
 
 ## M6 — Sermão
 - [x] M6.1 Modelo `rhema-sermon` + migrações + autosave atômico + backups rotativos
-- [~] M6.2 Editor em blocos (título, texto, nota, ilustração; versículo/léxico: só exibição, inserção na parte 2; menu `/` pendente)
-- [ ] M6.3 Inserir seleção do texto bíblico com `Ctrl+Enter`
+- [x] M6.2 Editor em blocos (título, texto, nota, ilustração, versículo, léxico; menu `/`)
+- [x] M6.3 Inserir seleção do texto bíblico com `Ctrl+Enter` (e verbete do léxico)
 - [ ] M6.4 Realces coloridos e anotações por versículo
 - [x] M6.5 Lista de sermões, duplicar, arquivar, buscar (sem acentos)
 - [~] M6.6 Exportar Markdown (feito), PDF e DOCX (pendentes)

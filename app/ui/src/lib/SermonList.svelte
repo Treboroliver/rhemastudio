@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { clearActiveSermonIf } from './sermonSession'
   import {
     asSermonError,
     formatDate,
@@ -71,7 +72,10 @@
   async function confirmRemoval() {
     const target = confirmDelete
     confirmDelete = null
-    if (target) await run(() => sermonDelete(target.id))
+    if (target) {
+      await run(() => sermonDelete(target.id))
+      clearActiveSermonIf(target.id)
+    }
   }
 
   function onMenuKeydown(event: KeyboardEvent) {
