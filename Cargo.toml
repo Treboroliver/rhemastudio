@@ -6,6 +6,7 @@ members = [
     "crates/rhema-twformat",
     "crates/rhema-library",
     "crates/rhema-search",
+    "crates/rhema-lexicon",
     "crates/rhema-sermon",
     "crates/rhema-cli",
     "tools/gen-fixtures",

@@ -72,7 +72,7 @@ Execução local em 07/11/2026: `rhema-cli lexmap-check E:\coding\modulos-teste`
 ## G — Recomendação E1a
 | Índice e ligações | Decisão |
 |---|---|
-| Campos | Indexar módulo, id, tipo, chave completa e normalizada, lema original/normalizado, transliteração e texto convertido; extrair o número inicial DITAT e domínio/subentrada Louw-Nida separadamente, preservando a chave original. |
+| Campos | Indexar módulo, id, tipo, chave completa e normalizada, lema original/normalizado, transliteração e texto convertido; extrair o número inicial DITAT e domínio/subentrada Louw-Nida separadamente, preservando a chave original. O núcleo E1a.1 não persiste texto de verbetes. |
 | Seguro | Chave Strong exata, chave Louw-Nida exata, lema explicitamente armazenado e identificação do módulo; conservar múltiplas entradas por chave. |
-| Candidatos | DITAT → primeiro H tem 71,5% de igualdade na amostra; Strong → Louw-Nida por ocorrência é recuperação aproximada. Guardar proveniência, não promover a equivalência automática. DITNT não oferece evidência inicial para G. |
+| Candidatos | DITAT → primeiro H tem 71,5% de igualdade na amostra; Strong → Louw-Nida por ocorrência no corpo é recuperação aproximada. E1a.1 usa somente cabeçalhos e encontrou igualdade de lemas com DITNT: ver [09](09-indice-lexical.md). Guardar proveniência, não promover a equivalência automática. |
 | Tratamento | Implementar ingestão HTML sanitizada e manter RVF com indicação de degradação/ausência. Nenhum mapeamento TWOT foi validado. |

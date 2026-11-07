@@ -28,6 +28,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Ferramentas do núcleo lexical
+    Lex {
+        #[command(subcommand)]
+        command: LexCommands,
+    },
+
     /// Verifica amostras e mapeamentos lexicais sem alterar módulos
     LexmapCheck {
         /// Pasta que contém os dicionários a analisar
@@ -132,6 +138,25 @@ enum Commands {
 }
 
 #[derive(Subcommand)]
+enum LexCommands {
+    /// Interpreta uma consulta lexical
+    Parse { text: String },
+    /// Constrói ligações persistentes a partir das pastas de módulos
+    LinksBuild {
+        #[arg(required = true)]
+        folders: Vec<PathBuf>,
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
+    /// Lista ligações para um número Strong
+    Links {
+        strong: String,
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
 enum LibraryCommands {
     /// Varre pastas e atualiza o catálogo local de módulos
     Scan {
@@ -153,6 +178,29 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Lex { command } => match command {
+            LexCommands::Parse { text } => {
+                println!(
+                    "{}",
+                    serde_json::to_string(&rhema_lexicon::parse_query(&text))?
+                );
+                Ok(())
+            }
+            LexCommands::LinksBuild { folders, db } => {
+                let path = lex_cache_path(db)?;
+                let report = rhema_lexicon::build_links(path, &folders)?;
+                println!("{}", serde_json::to_string(&report)?);
+                Ok(())
+            }
+            LexCommands::Links { strong, db } => {
+                let path = lex_cache_path(db)?;
+                println!(
+                    "{}",
+                    serde_json::to_string(&rhema_lexicon::links_for_strong(path, &strong)?)?
+                );
+                Ok(())
+            }
+        },
         Commands::LexmapCheck { folder } => lexmap::run(&folder),
         Commands::Inventory { folders } => inventory::run(&folders),
         Commands::Library { command } => match command {
@@ -229,6 +277,26 @@ fn main() -> Result<()> {
         }
         Commands::RtfSample { file, count } => rtf_sample(&file, count),
     }
+}
+
+fn lex_cache_path(path: Option<PathBuf>) -> Result<PathBuf> {
+    if let Some(path) = path {
+        return Ok(path);
+    }
+    let base = std::env::var_os("LOCALAPPDATA")
+        .or_else(|| std::env::var_os("XDG_DATA_HOME"))
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| {
+                PathBuf::from(home)
+                    .join(".local")
+                    .join("share")
+                    .into_os_string()
+            })
+        })
+        .ok_or_else(|| anyhow::anyhow!("Informe --db: pasta de dados local indisponível"))?;
+    let dir = PathBuf::from(base).join("RhemaStudio");
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir.join("lexicon-links.sqlite"))
 }
 
 fn scan_library(folders: &[PathBuf], cache_dir: Option<&Path>, json: bool) -> Result<()> {

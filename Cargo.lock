@@ -2951,6 +2951,7 @@ dependencies = [
  "encoding_rs",
  "regex",
  "rhema-core",
+ "rhema-lexicon",
  "rhema-library",
  "rhema-refs",
  "rhema-twformat",
@@ -2967,6 +2968,21 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "rhema-lexicon"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "rhema-core",
+ "rhema-twformat",
+ "rusqlite",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.21",
+ "unicode-normalization",
+ "walkdir",
 ]
 
 [[package]]

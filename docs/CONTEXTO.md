@@ -8,6 +8,7 @@ Referências: [plano](06-plano-exegese.md) e [inventário E0](07-inventario-exeg
 
 - E0: concluído — inventário local e CLI somente leitura.
 - E0b: concluído — testes de mapeamento lexical e recomendação E1a em [08-mapeamento-lexical.md](08-mapeamento-lexical.md).
+- E1a.1: concluído — núcleo lexical, extração e ligações locais; detalhes e limites em [09-indice-lexical.md](09-indice-lexical.md).
 - E1a: pendente — índice de léxicos.
 - E1b: pendente — índice reverso e busca de léxico.
 - E2a: pendente — painel de palavra.

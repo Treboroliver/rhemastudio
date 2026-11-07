@@ -1,0 +1,19 @@
+[package]
+name = "rhema-lexicon"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+rhema-core = { workspace = true }
+rhema-twformat = { path = "../rhema-twformat" }
+unicode-normalization = "0.1"
+regex = "1"
+rusqlite = { version = "0.33", features = ["bundled"] }
+serde = { workspace = true }
+thiserror = { workspace = true }
+walkdir = "2.5"
+
+[dev-dependencies]
+tempfile = "3"

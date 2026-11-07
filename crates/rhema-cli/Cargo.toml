@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 rhema-core = { workspace = true }
 rhema-library = { path = "../rhema-library" }
+rhema-lexicon = { path = "../rhema-lexicon" }
 rhema-refs = { path = "../rhema-refs" }
 rhema-twformat = { path = "../rhema-twformat" }
 clap = { version = "4.5", features = ["derive"] }

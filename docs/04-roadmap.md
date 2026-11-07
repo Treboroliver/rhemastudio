@@ -2,6 +2,10 @@
 
 Marque `[x]` ao concluir. Cada milestone só termina quando **todos** os critérios de aceite passam e o DoD do `AGENTS.md` é atendido.
 
+## Exegese — E1a
+- [x] E1a.1 Núcleo lexical, extratores e ligações persistentes com proveniência; ver [09-indice-lexical.md](09-indice-lexical.md).
+- [ ] E1a restante: índice textual, busca integrada e interface.
+
 ---
 
 ## M0 — Fundação
