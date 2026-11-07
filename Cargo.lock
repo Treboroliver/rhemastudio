@@ -2949,12 +2949,15 @@ dependencies = [
  "anyhow",
  "clap",
  "encoding_rs",
+ "regex",
  "rhema-core",
  "rhema-library",
  "rhema-refs",
  "rhema-twformat",
  "rusqlite",
  "serde_json",
+ "tempfile",
+ "walkdir",
 ]
 
 [[package]]

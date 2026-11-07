@@ -2,6 +2,26 @@
 
 Atualizado em 2026-11-02. M6b-2 concluído (sermão ligado à leitura); M4b continua fora do escopo. Pendências conhecidas: `docs/PENDENCIAS.md`.
 
+## Plano de exegese
+
+Referências: [plano](06-plano-exegese.md) e [inventário E0](07-inventario-exegetico.md).
+
+- E0: concluído — inventário local e CLI somente leitura.
+- E1a: pendente — índice de léxicos.
+- E1b: pendente — índice reverso e busca de léxico.
+- E2a: pendente — painel de palavra.
+- E2b: pendente — interlinear.
+- E3: pendente — textos originais e morfologia.
+- E4a: pendente — editor rico e persistência.
+- E4b: pendente — nós bíblicos e cartões.
+- E4c: pendente — recursos avançados do editor.
+- E4d: pendente — exportação e impressão.
+- E5.0: pendente — avaliação das bibliotecas de quadro.
+- E5a: pendente — quadro persistente.
+- E5b: pendente — diagramas e incorporação.
+- M7: pendente — púlpito e projeção.
+- M5, M4b, M8: pendentes — busca, referências cruzadas e acabamento.
+
 - Sermão × leitura (M6b-2): comandos `get_verse_snapshot` (≤80 versículos, faixas numeradas, sem notas/títulos) e `get_lexicon_snapshot` (≤1.500 caracteres) em `app/src-tauri/src/snapshot.rs`. UI: `sermonSession.ts` (sermão ativo = último aberto; insere no editor aberto depois do último bloco focado, ou grava direto no banco), `SermonPicker` ("Em qual sermão?"), `VerseRefBox` (menu "/" → referência), aviso com Desfazer (8 s) no `App.svelte`, Ctrl+Enter global. Bloco Versículo: trocar tradução, ir para a leitura, módulo ausente mostra o texto salvo. O teste de 1.000 blocos só roda com `RHEMA_SLOW_TESTS=1`.
 - UI do sermão (M6b-1): aba Sermão no painel direito (lista, editor de blocos, autosave 500 ms com fila, Ctrl+S, gravação ao voltar/trocar de aba/fechar, versões, exportação Markdown). Botão Expandir (420 px ↔ 50%, `study_panel_expanded`). Código em `app/ui/src/lib/Sermon*.svelte` e `sermon.ts`. Busca por título sem acentos no backend. Inserção de versículo/léxico: M6b-2.
 - Sermão: crate `rhema-sermon` (modelo de blocos, SQLite WAL + `user_version` v2, versões rotativas: ≤1/min, 20 mais recentes, restore reversível, export Markdown). Comandos Tauri `sermon_*` em `app/src-tauri/src/sermon.rs`; banco `rhema.db` na pasta de dados do app; `sermon_save_export` usa o diálogo nativo. 1.000 blocos em release: salvar 16 ms, carregar 5 ms.

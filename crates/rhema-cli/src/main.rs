@@ -13,6 +13,8 @@ use rhema_library::{Library, ModuleInfo, ModuleState};
 use rhema_refs::{FormatStyle, Language, ParseOutcome};
 use rhema_twformat::{CommentarySource, DictionarySource, OntReader};
 
+mod inventory;
+
 #[derive(Parser)]
 #[command(
     name = "rhema-cli",
@@ -25,6 +27,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Inventaria módulos locais sem alterar seus arquivos
+    Inventory {
+        /// Pastas para percorrer recursivamente
+        #[arg(required = true)]
+        folders: Vec<PathBuf>,
+    },
+
     /// Gerencia o catálogo de módulos
     Library {
         #[command(subcommand)]
@@ -137,6 +146,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Inventory { folders } => inventory::run(&folders),
         Commands::Library { command } => match command {
             LibraryCommands::Scan {
                 folders,
