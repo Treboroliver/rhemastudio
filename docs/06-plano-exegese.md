@@ -42,6 +42,8 @@ Somente os módulos que o usuário já possui (dicionários `.dct.twm`). Nada de
 2. **Índice reverso palavra → Strong**, construído a partir das Bíblias com Strong que o usuário tem (hoje ARA+ e KJV): para cada palavra normalizada, os números Strong associados e a frequência. Dá "palavra do texto → original provável".
 3. **Mapas entre sistemas** (Strong ↔ TWOT, Strong ↔ Louw-Nida) **somente se saírem dos dados do usuário** (por exemplo, citações dentro dos verbetes `[VERIFICAR]`). Nenhuma tabela inventada. Quando não houver mapa, o painel mostra apenas o que o módulo permite e diz isso com clareza.
 
+**E0/E0b:** NA28 disponível sem tags e nenhuma Bíblia hebraica identificada; HTML e RVF precisam de tratamento explícito. DITAT inclui números no início de muitas chaves; ocorrências e comparações de lemas geram candidatos, não mapas automaticamente confiáveis. Detalhes em [inventário](07-inventario-exegetico.md) e [mapeamento](08-mapeamento-lexical.md).
+
 ### 3.4 Painel de estudo de palavra (ao clicar numa palavra)
 - Um cartão por léxico (Strong/AMG, Louw-Nida, DITAT, outros), na ordem de preferência do usuário.
 - **Ocorrências:** lista de versículos com o mesmo Strong, contagem por livro, clique navega a leitura.

@@ -14,6 +14,7 @@ use rhema_refs::{FormatStyle, Language, ParseOutcome};
 use rhema_twformat::{CommentarySource, DictionarySource, OntReader};
 
 mod inventory;
+mod lexmap;
 
 #[derive(Parser)]
 #[command(
@@ -27,6 +28,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Verifica amostras e mapeamentos lexicais sem alterar módulos
+    LexmapCheck {
+        /// Pasta que contém os dicionários a analisar
+        folder: PathBuf,
+    },
+
     /// Inventaria módulos locais sem alterar seus arquivos
     Inventory {
         /// Pastas para percorrer recursivamente
@@ -146,6 +153,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::LexmapCheck { folder } => lexmap::run(&folder),
         Commands::Inventory { folders } => inventory::run(&folders),
         Commands::Library { command } => match command {
             LibraryCommands::Scan {

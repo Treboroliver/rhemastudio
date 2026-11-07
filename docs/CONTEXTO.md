@@ -7,6 +7,7 @@ Atualizado em 2026-11-02. M6b-2 concluído (sermão ligado à leitura); M4b cont
 Referências: [plano](06-plano-exegese.md) e [inventário E0](07-inventario-exegetico.md).
 
 - E0: concluído — inventário local e CLI somente leitura.
+- E0b: concluído — testes de mapeamento lexical e recomendação E1a em [08-mapeamento-lexical.md](08-mapeamento-lexical.md).
 - E1a: pendente — índice de léxicos.
 - E1b: pendente — índice reverso e busca de léxico.
 - E2a: pendente — painel de palavra.
