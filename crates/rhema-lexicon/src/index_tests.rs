@@ -235,7 +235,9 @@ fn searches_each_query_type_with_ranking() -> Result<(), LexiconError> {
         ["25", "25.43", "25.44"]
     );
     assert_eq!(ordered(&domain)[1].field, MatchField::DomainPrefix);
-    assert_eq!(index.search("25", 2, &none)?.total, 2);
+    let paged = index.search("25", 2, &none)?;
+    assert_eq!(paged.total, 3);
+    assert_eq!(paged.shown, 2);
 
     let ditat = index.search("DITAT 57", 20, &none)?;
     assert_eq!(ordered(&ditat)[0].key, "57 אָהַב (’ahab)");
@@ -244,6 +246,10 @@ fn searches_each_query_type_with_ranking() -> Result<(), LexiconError> {
 
     let greek = index.search("ἀγαπάω", 20, &none)?;
     let latin = index.search("agapao", 20, &none)?;
+    assert_eq!(greek.groups[0].kind, LexKind::Strong);
+    assert_eq!(greek.groups[0].hits[0].key, "G25");
+    assert_eq!(latin.groups[0].kind, LexKind::Strong);
+    assert_eq!(latin.groups[0].hits[0].key, "G25");
     assert_eq!(keys_in(&greek, "strong_amg.dct.twm"), ["G25"]);
     assert_eq!(keys_in(&latin, "strong_amg.dct.twm"), ["G25"]);
     assert_eq!(keys_in(&greek, "louw-nida.dct.twm"), ["25.43"]);
@@ -252,6 +258,16 @@ fn searches_each_query_type_with_ranking() -> Result<(), LexiconError> {
     assert!(ordered(&latin)
         .iter()
         .all(|h| h.field == MatchField::Translit));
+
+    let strong_vs_ditnt = index.search("χάρις", 20, &none)?;
+    assert_eq!(strong_vs_ditnt.groups[0].kind, LexKind::Ditnt);
+    assert_eq!(strong_vs_ditnt.groups[0].hits[0].field, MatchField::Key);
+    assert_eq!(strong_vs_ditnt.groups[1].kind, LexKind::Strong);
+    assert_eq!(strong_vs_ditnt.groups[1].hits[0].key, "G5485");
+    assert_eq!(strong_vs_ditnt.groups[1].hits[0].field, MatchField::Lemma);
+    let translit_tie = index.search("charis", 20, &none)?;
+    assert_eq!(translit_tie.groups[0].kind, LexKind::Strong);
+    assert_eq!(translit_tie.groups[0].hits[0].key, "G5485");
 
     let prefix = index.search("λογ", 20, &none)?;
     assert!(ordered(&prefix)
@@ -470,4 +486,37 @@ fn natural_order_of_keys() {
     let mut keys = vec!["25.10", "25.9", "25", "3", "25.100"];
     keys.sort_by(|a, b| natural_cmp(a, b));
     assert_eq!(keys, ["3", "25", "25.9", "25.10", "25.100"]);
+}
+
+#[test]
+fn indexes_html_module_and_searches_body() -> Result<(), LexiconError> {
+    let dir = tempfile::tempdir()?;
+    let modules = dir.path().join("modulos");
+    fs::create_dir(&modules)?;
+    let path = modules.join("enciclopedia_html.dct.twm");
+    let db = Connection::open(&path)?;
+    db.execute_batch(
+        "CREATE TABLE config(name TEXT, value TEXT);
+         CREATE TABLE topics(id INTEGER,subject TEXT,strong_orig_word TEXT,content_type TEXT);
+         CREATE TABLE content(topic_id INTEGER,data BLOB);",
+    )?;
+    db.execute("INSERT INTO config VALUES ('content.type', 'html')", [])?;
+    let html = b"<style>.x{color:red}</style><script>var oculto='segredo';</script>\
+        <h1>Verbete</h1><p>A esperan&ccedil;a e a f&#233; inventadas.</p>";
+    db.execute("INSERT INTO topics VALUES (1,'Esperanca','',NULL)", [])?;
+    db.execute(
+        "INSERT INTO content VALUES (1,?1)",
+        params![html.as_slice()],
+    )?;
+    drop(db);
+
+    let index_dir = dir.path().join("indice");
+    let report = build_index(&index_dir, std::slice::from_ref(&modules), &mut |_| {})?;
+    assert_eq!(report.modules[0].unreadable, 0);
+    let index = LexiconIndex::open(&index_dir)?;
+    let none = SearchFilters::default();
+    assert_eq!(index.search("esperanca", 10, &none)?.total, 1);
+    assert_eq!(index.search("fe", 10, &none)?.total, 1);
+    assert_eq!(index.search("segredo", 10, &none)?.total, 0);
+    Ok(())
 }

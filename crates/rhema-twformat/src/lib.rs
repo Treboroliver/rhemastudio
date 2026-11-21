@@ -1,5 +1,6 @@
 pub mod bible_reader;
 pub mod detect;
+pub mod html;
 pub mod markup;
 pub mod protection;
 pub mod rtf;
@@ -8,6 +9,7 @@ pub mod twm;
 
 pub use bible_reader::{should_use_utf8_for_windows_1252, BibleScope, OntReader, Utf8VerseProbe};
 pub use detect::{detect_signature, ModuleSignature, SQLITE_MAGIC, TW_ENCRYPTED_MAGIC};
+pub use html::convert_html;
 pub use markup::{plain_text, tokenize_markup};
 pub use protection::ensure_twm_unprotected;
 pub use rtf::{

@@ -115,7 +115,10 @@ impl TwmModule {
         row_type: Option<&str>,
     ) -> Result<crate::DecodedContent, ModuleError> {
         let content_type = self.content_type(row_type);
-        if content_type != "rtf" && content_type != "rvf" {
+        if !matches!(
+            content_type.as_str(),
+            "rtf" | "rvf" | "html" | "" | "txt" | "text"
+        ) {
             return Err(ModuleError::UnsupportedContent(content_type));
         }
         let bytes = self.read_content_bytes(topic_id)?;
@@ -131,7 +134,10 @@ impl TwmModule {
         max_chars: usize,
     ) -> Result<RtfPage, ModuleError> {
         let content_type = self.content_type(row_type);
-        if content_type != "rtf" && content_type != "rvf" {
+        if !matches!(
+            content_type.as_str(),
+            "rtf" | "rvf" | "html" | "" | "txt" | "text"
+        ) {
             return Err(ModuleError::UnsupportedContent(content_type));
         }
         let bytes = self.read_content_bytes(topic_id)?;

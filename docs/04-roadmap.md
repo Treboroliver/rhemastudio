@@ -5,6 +5,7 @@ Marque `[x]` ao concluir. Cada milestone só termina quando **todos** os critér
 ## Exegese — E1a
 - [x] E1a.1 Núcleo lexical, extratores e ligações persistentes com proveniência; ver [09-indice-lexical.md](09-indice-lexical.md).
 - [x] E1a.2 Índice de léxicos (tantivy), busca integrada e CLI; ver [09-indice-lexical.md](09-indice-lexical.md).
+- [x] E1a.3 Decodificador HTML, desempate por tipo e total real da busca; ver [09-indice-lexical.md](09-indice-lexical.md).
 - [ ] E1b: índice reverso e interface.
 
 ---

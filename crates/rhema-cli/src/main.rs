@@ -255,6 +255,7 @@ fn main() -> Result<()> {
                 if let Some(msg) = index.status().message() {
                     results.notes.push(msg);
                 }
+                println!("total={} (mostrando {})", results.total, results.shown);
                 println!("{}", serde_json::to_string_pretty(&results)?);
                 Ok(())
             }

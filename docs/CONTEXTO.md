@@ -10,6 +10,7 @@ Referências: [plano](06-plano-exegese.md) e [inventário E0](07-inventario-exeg
 - E0b: concluído — testes de mapeamento lexical e recomendação E1a em [08-mapeamento-lexical.md](08-mapeamento-lexical.md).
 - E1a.1: concluído — núcleo lexical, extração e ligações locais; detalhes e limites em [09-indice-lexical.md](09-indice-lexical.md).
 - E1a.2: concluído — índice de léxicos (tantivy), busca e CLI; detalhes em [09-indice-lexical.md](09-indice-lexical.md).
+- E1a.3: concluído — decodificador HTML, desempate por tipo e total real; ver [09-indice-lexical.md](09-indice-lexical.md).
 - E1b: pendente — índice reverso e interface.
 - E2a: pendente — painel de palavra.
 - E2b: pendente — interlinear.

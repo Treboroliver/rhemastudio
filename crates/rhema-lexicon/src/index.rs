@@ -7,7 +7,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use rhema_core::ModuleError;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
-use tantivy::collector::TopDocs;
+use tantivy::collector::{Count, TopDocs};
 use tantivy::merge_policy::NoMergePolicy;
 use tantivy::query::{
     BooleanQuery, ConstScoreQuery, Occur, Query as TQuery, RegexQuery, TermQuery,
@@ -63,6 +63,16 @@ impl LexKind {
             "ditat" => Self::Ditat,
             "ditnt" => Self::Ditnt,
             _ => Self::Generic,
+        }
+    }
+
+    fn priority(self) -> u8 {
+        match self {
+            Self::Strong => 0,
+            Self::LouwNida => 1,
+            Self::Ditat => 2,
+            Self::Ditnt => 3,
+            Self::Generic => 4,
         }
     }
 }
@@ -245,6 +255,7 @@ pub struct ModuleHits {
 pub struct SearchResults {
     pub interpretations: Vec<Query>,
     pub total: usize,
+    pub shown: usize,
     pub groups: Vec<ModuleHits>,
     pub notes: Vec<String>,
 }
@@ -1151,6 +1162,7 @@ impl LexiconIndex {
         let searcher = self.reader.searcher();
         let mut best: HashMap<DocAddress, (f32, usize)> = HashMap::new();
         let mut meta = Vec::new();
+        let mut count_queries: Vec<Box<dyn TQuery>> = Vec::with_capacity(plans.len());
         for (i, plan) in plans.into_iter().enumerate() {
             let query = self.filtered(plan.query, filters);
             let found = searcher.search(&*query, &TopDocs::with_limit(limit).order_by_score())?;
@@ -1164,8 +1176,14 @@ impl LexiconIndex {
                     *slot = (score, i);
                 }
             }
+            count_queries.push(query);
             meta.push((plan.field, plan.interpretation, plan.provenance));
         }
+        let total = if count_queries.is_empty() {
+            0
+        } else {
+            searcher.search(&*any(count_queries), &Count)?
+        };
         let mut hits = Vec::new();
         for (address, (score, i)) in best {
             let doc: TantivyDocument = searcher.doc(address)?;
@@ -1191,11 +1209,12 @@ impl LexiconIndex {
         hits.sort_by(|a, b| {
             b.2.score
                 .total_cmp(&a.2.score)
+                .then_with(|| a.1.priority().cmp(&b.1.priority()))
                 .then_with(|| a.0.cmp(&b.0))
                 .then_with(|| natural_cmp(&a.2.key, &b.2.key))
         });
         hits.truncate(limit);
-        let total = hits.len();
+        let shown = hits.len();
         let mut groups: Vec<ModuleHits> = Vec::new();
         for (module_id, kind, hit) in hits {
             match groups.iter_mut().find(|g| g.module_id == module_id) {
@@ -1210,6 +1229,7 @@ impl LexiconIndex {
         Ok(SearchResults {
             interpretations,
             total,
+            shown,
             groups,
             notes,
         })

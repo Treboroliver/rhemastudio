@@ -15,3 +15,4 @@
 - Ctrl+Enter insere só um versículo (a faixa selecionada ainda não existe); "/Jo 3:16-18" usa a primeira faixa.
 - Teste de 1.000 blocos da UI é lento e fica fora da suíte padrão (`RHEMA_SLOW_TESTS=1`).
 - Busca lexical sem stemming: "amor" não encontra "amores" e "amores" não encontra "amor" (apenas correspondência sem acentos).
+- Decodificador HTML (`convert_html`) extrai texto e parágrafos sem preservar formatação inline (negrito, itálico, links).

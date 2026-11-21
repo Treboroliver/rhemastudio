@@ -753,6 +753,14 @@ pub fn decode_twm_content_checked(
                 degraded: conversion.degraded,
             })
         }
+        "html" => Ok(DecodedContent {
+            nodes: crate::html::convert_html(input),
+            degraded: false,
+        }),
+        "" | "txt" | "text" => Ok(DecodedContent {
+            nodes: crate::html::convert_plain_bytes(input),
+            degraded: false,
+        }),
         other => Err(ModuleError::UnsupportedContent(other.to_string())),
     }
 }
@@ -814,6 +822,18 @@ pub fn decode_twm_content_page(
             page.degraded = degraded;
             Ok(page)
         }
+        "html" => Ok(page_nodes(
+            crate::html::convert_html(input),
+            offset,
+            max_paragraphs,
+            max_chars,
+        )),
+        "" | "txt" | "text" => Ok(page_nodes(
+            crate::html::convert_plain_bytes(input),
+            offset,
+            max_paragraphs,
+            max_chars,
+        )),
         other => Err(ModuleError::UnsupportedContent(other.to_string())),
     }
 }

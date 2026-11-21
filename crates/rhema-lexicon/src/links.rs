@@ -3,8 +3,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Instant, UNIX_EPOCH};
 
-use rhema_core::ModuleError;
-use rhema_twformat::{decode_twm_content, plain_text};
+use rhema_core::{ModuleError, Node};
+use rhema_twformat::decode_twm_content;
 use rusqlite::{params, Connection, OpenFlags};
 use serde::Serialize;
 use thiserror::Error;
@@ -341,8 +341,19 @@ pub(crate) fn decoded(row: &Row) -> Result<Option<String>, ModuleError> {
     row.bytes
         .as_ref()
         .map(|bytes| {
-            decode_twm_content(&row.kind.to_ascii_lowercase(), bytes)
-                .map(|nodes| plain_text(&nodes))
+            decode_twm_content(&row.kind.to_ascii_lowercase(), bytes).map(|nodes| {
+                let mut out = String::new();
+                for node in nodes {
+                    if matches!(node, Node::Paragraph) {
+                        if !out.ends_with('\n') && !out.is_empty() {
+                            out.push('\n');
+                        }
+                    } else {
+                        out.push_str(&node.to_plain_text());
+                    }
+                }
+                out
+            })
         })
         .transpose()
 }
