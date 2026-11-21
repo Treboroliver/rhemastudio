@@ -154,6 +154,32 @@ enum LexCommands {
         #[arg(long)]
         db: Option<PathBuf>,
     },
+    /// Constrói o índice lexical (tantivy) a partir das pastas de módulos
+    IndexBuild {
+        #[arg(required = true)]
+        folders: Vec<PathBuf>,
+        #[arg(long)]
+        index_dir: Option<PathBuf>,
+    },
+    /// Busca no índice lexical (apenas chaves e campos)
+    Search {
+        query: String,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        #[arg(long = "module")]
+        modules: Vec<String>,
+        #[arg(long)]
+        index_dir: Option<PathBuf>,
+    },
+    /// Mede a latência de consultas variadas no índice lexical
+    Bench {
+        #[arg(long)]
+        index_dir: Option<PathBuf>,
+        #[arg(long, default_value_t = 200)]
+        count: usize,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
 }
 
 #[derive(Subcommand)]
@@ -198,6 +224,86 @@ fn main() -> Result<()> {
                     "{}",
                     serde_json::to_string(&rhema_lexicon::links_for_strong(path, &strong)?)?
                 );
+                Ok(())
+            }
+            LexCommands::IndexBuild { folders, index_dir } => {
+                let dir = lex_index_dir(index_dir)?;
+                let report = rhema_lexicon::build_index(&dir, &folders, &mut |_| {})?;
+                println!("{}", serde_json::to_string_pretty(&report)?);
+                Ok(())
+            }
+            LexCommands::Search {
+                query,
+                limit,
+                modules,
+                index_dir,
+            } => {
+                let dir = lex_index_dir(index_dir)?;
+                let index = open_lex_index(&dir)?;
+                let filters = rhema_lexicon::SearchFilters {
+                    modules: modules
+                        .iter()
+                        .map(|m| {
+                            index
+                                .resolve_module(m)
+                                .map_or_else(|| m.clone(), str::to_string)
+                        })
+                        .collect(),
+                    kinds: Vec::new(),
+                };
+                let mut results = index.search(&query, limit, &filters)?;
+                if let Some(msg) = index.status().message() {
+                    results.notes.push(msg);
+                }
+                println!("{}", serde_json::to_string_pretty(&results)?);
+                Ok(())
+            }
+            LexCommands::Bench {
+                index_dir,
+                count,
+                limit,
+            } => {
+                let dir = lex_index_dir(index_dir)?;
+                let t0 = std::time::Instant::now();
+                let index = open_lex_index(&dir)?;
+                let open_ms = t0.elapsed().as_secs_f64() * 1000.0;
+                let queries = rhema_lexicon::bench_queries(count);
+                let filters = rhema_lexicon::SearchFilters::default();
+                let mut times = Vec::with_capacity(queries.len());
+                let mut non_empty = 0usize;
+                for q in &queries {
+                    let start = std::time::Instant::now();
+                    let res = index.search(q, limit, &filters)?;
+                    times.push(start.elapsed().as_secs_f64() * 1000.0);
+                    if res.total > 0 {
+                        non_empty += 1;
+                    }
+                }
+                times.sort_by(f64::total_cmp);
+                let pct = |p: usize| -> f64 {
+                    if times.is_empty() {
+                        0.0
+                    } else {
+                        let idx = ((times.len() - 1) * p) / 100;
+                        times[idx]
+                    }
+                };
+                let mean = if times.is_empty() {
+                    0.0
+                } else {
+                    times.iter().sum::<f64>() / times.len() as f64
+                };
+                let out = serde_json::json!({
+                    "index_dir": dir,
+                    "open_ms": (open_ms * 100.0).round() / 100.0,
+                    "queries": times.len(),
+                    "non_empty": non_empty,
+                    "p50_ms": (pct(50) * 100.0).round() / 100.0,
+                    "p95_ms": (pct(95) * 100.0).round() / 100.0,
+                    "max_ms": (times.last().copied().unwrap_or(0.0) * 100.0).round() / 100.0,
+                    "mean_ms": (mean * 100.0).round() / 100.0,
+                });
+                println!("{}", serde_json::to_string_pretty(&out)?);
                 Ok(())
             }
         },
@@ -297,6 +403,26 @@ fn lex_cache_path(path: Option<PathBuf>) -> Result<PathBuf> {
     let dir = PathBuf::from(base).join("RhemaStudio");
     std::fs::create_dir_all(&dir)?;
     Ok(dir.join("lexicon-links.sqlite"))
+}
+
+fn lex_index_dir(path: Option<PathBuf>) -> Result<PathBuf> {
+    if let Some(path) = path {
+        return Ok(path);
+    }
+    rhema_lexicon::default_index_dir()
+        .ok_or_else(|| anyhow::anyhow!("Informe --index-dir: pasta de dados local indisponível"))
+}
+
+fn open_lex_index(dir: &Path) -> Result<rhema_lexicon::LexiconIndex> {
+    let index = rhema_lexicon::LexiconIndex::open(dir)?;
+    if let Some(links) = rhema_lexicon::default_data_dir()
+        .map(|d| d.join("lexicon-links.sqlite"))
+        .filter(|p| p.exists())
+    {
+        Ok(index.with_links(links))
+    } else {
+        Ok(index)
+    }
 }
 
 fn scan_library(folders: &[PathBuf], cache_dir: Option<&Path>, json: bool) -> Result<()> {

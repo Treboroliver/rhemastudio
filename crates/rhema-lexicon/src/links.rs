@@ -26,6 +26,10 @@ pub enum LexiconError {
     Module(#[from] ModuleError),
     #[error("{0}")]
     Invalid(String),
+    #[error("Erro no índice: {0}")]
+    Index(#[from] tantivy::TantivyError),
+    #[error("Reconstrução necessária: {0}")]
+    RebuildRequired(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -88,7 +92,7 @@ pub struct BuildReport {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Kind {
+pub(crate) enum Kind {
     Strong,
     Louw,
     Ditat,
@@ -104,7 +108,7 @@ struct Module {
     modified_ns: u128,
 }
 
-fn classify(name: &str) -> Option<Kind> {
+pub(crate) fn classify(name: &str) -> Option<Kind> {
     let name = name.to_lowercase();
     if name.contains("strong_amg") || name.contains("strong anotado pela amg") {
         Some(Kind::Strong)
@@ -121,7 +125,7 @@ fn classify(name: &str) -> Option<Kind> {
     }
 }
 
-fn read_db(path: &Path) -> Result<Connection, LexiconError> {
+pub(crate) fn read_db(path: &Path) -> Result<Connection, LexiconError> {
     rhema_twformat::ensure_twm_unprotected(path)?;
     let db = Connection::open_with_flags(
         path,
@@ -285,18 +289,18 @@ fn open_cache(path: &Path, create: bool) -> Result<Connection, LexiconError> {
     Ok(db)
 }
 
-struct Row {
-    key: String,
-    original: String,
-    kind: String,
-    bytes: Option<Vec<u8>>,
+pub(crate) struct Row {
+    pub(crate) key: String,
+    pub(crate) original: String,
+    pub(crate) kind: String,
+    pub(crate) bytes: Option<Vec<u8>>,
 }
 
-fn entries<F>(module: &Module, mut visit: F) -> Result<usize, LexiconError>
+pub(crate) fn entries<F>(path: &Path, mut visit: F) -> Result<usize, LexiconError>
 where
     F: FnMut(Row) -> Result<(), LexiconError>,
 {
-    let db = read_db(&module.path)?;
+    let db = read_db(path)?;
     let has_original: bool = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('topics') WHERE name='strong_orig_word')",
         [],
@@ -333,7 +337,7 @@ where
     Ok(count)
 }
 
-fn decoded(row: &Row) -> Result<Option<String>, ModuleError> {
+pub(crate) fn decoded(row: &Row) -> Result<Option<String>, ModuleError> {
     row.bytes
         .as_ref()
         .map(|bytes| {
@@ -358,7 +362,7 @@ pub fn build_links(
     let mut greek: HashMap<String, Vec<usize>> = HashMap::new();
     let mut unreadable = 0;
     for module in modules.iter().filter(|m| m.kind == Kind::Strong) {
-        entries(module, |row| {
+        entries(&module.path, |row| {
             let text = match decoded(&row) {
                 Ok(Some(text)) => text,
                 Ok(None) => {
@@ -402,7 +406,7 @@ pub fn build_links(
     let mut ditat_header_comparable_entries = 0usize;
     let mut ditat_header_agreeing_entries = 0usize;
     for module in modules.iter().filter(|m| m.kind != Kind::Strong) {
-        entries(module, |row| {
+        entries(&module.path, |row| {
             let text = match decoded(&row) {
                 Ok(Some(text)) => text,
                 Ok(None) => {

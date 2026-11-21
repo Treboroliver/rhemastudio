@@ -51,3 +51,11 @@ Classificação **heurística, não validação linguística**: escrita = iguald
 | Outra/indeterminada | H2692/1: xxx~xxxxx+xxxxxx; H4057/1: xxx~xxxxxxx; H3728/1027: xxxxxxx~xxxxxxx; H3738/1036: xxxxxxx~xxxxxx; H3739/1036: xxxxxxx~xxxxxx |
 
 As taxas não demonstram equivalência semântica; as ligações preservam proveniência. As 19 entradas com cabeçalho não identificado exigem análise adicional. Indexação textual e interface permanecem em E1a.
+
+## E1a.2 — Índice textual e busca
+
+- **Campos (tantivy):** armazenados somente `module_id`, `kind` e `key`; indexados `key_norm`, `lemma` e `lemma_norm` (multivalorados, `fold_greek`/`fold_hebrew`), `translit` (`fold_latin`), `refs` (G/H do cabeçalho) e `body` (`plain_text` com `fold_latin`, não armazenado). Louw-Nida e DITNT recebem `translit_greek` nos lemas; hebraico usa só a transliteração do módulo.
+- **Consultas (`parse_query`):** Strong (`key_norm`, `refs` e `links_for_strong` com proveniência), Louw-Nida (chave exata e prefixo `domínio.N`), DITAT (número e subentrada `sub:N`), Grego/Hebraico (`lemma_norm` exato e prefixo), Latim (`translit`, `key_norm` e `body` sem acentos e sem stemming).
+- **Ranking e saída:** `key > subentrada > dominio > ligacao > lemma > lemma_prefixo > translit > key_norm > refs > body` (BM25 apenas em `body`). Resultados agrupados por módulo com chaves, campos, escore e interpretação; nunca texto de verbete.
+- **Invalidação e segurança:** gravação em geração temporária com troca atômica de `CURRENT`; `rhema-index.json` registra `schema_version`, raízes, id, caminho, tamanho e data; `status()` detecta módulo novo, alterado ou removido; pasta padrão fora do repositório.
+- **Medições (release, 12 módulos legíveis, 1 protegido ignorado, 49.403 entradas):** varredura 430 ms; construção 29.696 ms; índice 13.717.490 bytes; abertura 2,56 ms; 200 consultas com p50 0,13 ms, p95 1,53 ms e máx 2,85 ms. `graça` e `graca` retornam o mesmo conjunto (50); `G25` (pos. 1) e `25.43` (pos. 1) aparecem no topo; `ἀγαπάω` e `agapao` casam os mesmos 3 Louw-Nida e `G25` no Strong (`agapao` soma 3 ocorrências no corpo).
