@@ -180,6 +180,21 @@ enum LexCommands {
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
+    /// Constrói o índice reverso palavra -> Strong a partir das Bíblias com tags
+    WordsBuild {
+        #[arg(required = true)]
+        folders: Vec<PathBuf>,
+        #[arg(long)]
+        cache: Option<PathBuf>,
+    },
+    /// Sugere números Strong para uma palavra usando o índice reverso
+    Words {
+        word: String,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        #[arg(long)]
+        cache: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -307,6 +322,18 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&out)?);
                 Ok(())
             }
+            LexCommands::WordsBuild { folders, cache } => {
+                let path = lex_reverse_path(cache)?;
+                let report = rhema_lexicon::build_reverse_index(path, &folders)?;
+                println!("{}", serde_json::to_string_pretty(&report)?);
+                Ok(())
+            }
+            LexCommands::Words { word, limit, cache } => {
+                let path = lex_reverse_path(cache)?;
+                let suggestions = rhema_lexicon::suggest_strongs(path, &word, limit)?;
+                println!("{}", serde_json::to_string_pretty(&suggestions)?);
+                Ok(())
+            }
         },
         Commands::LexmapCheck { folder } => lexmap::run(&folder),
         Commands::Inventory { folders } => inventory::run(&folders),
@@ -414,16 +441,26 @@ fn lex_index_dir(path: Option<PathBuf>) -> Result<PathBuf> {
         .ok_or_else(|| anyhow::anyhow!("Informe --index-dir: pasta de dados local indisponível"))
 }
 
+fn lex_reverse_path(path: Option<PathBuf>) -> Result<PathBuf> {
+    if let Some(path) = path {
+        return Ok(path);
+    }
+    rhema_lexicon::default_reverse_path()
+        .ok_or_else(|| anyhow::anyhow!("Informe --cache: pasta de dados local indisponível"))
+}
+
 fn open_lex_index(dir: &Path) -> Result<rhema_lexicon::LexiconIndex> {
-    let index = rhema_lexicon::LexiconIndex::open(dir)?;
+    let mut index = rhema_lexicon::LexiconIndex::open(dir)?;
     if let Some(links) = rhema_lexicon::default_data_dir()
         .map(|d| d.join("lexicon-links.sqlite"))
         .filter(|p| p.exists())
     {
-        Ok(index.with_links(links))
-    } else {
-        Ok(index)
+        index = index.with_links(links);
     }
+    if let Some(rev) = rhema_lexicon::default_reverse_path().filter(|p| p.exists()) {
+        index = index.with_reverse(rev);
+    }
+    Ok(index)
 }
 
 fn scan_library(folders: &[PathBuf], cache_dir: Option<&Path>, json: bool) -> Result<()> {

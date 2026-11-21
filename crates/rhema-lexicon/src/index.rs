@@ -194,6 +194,7 @@ pub enum MatchField {
     Translit,
     KeyNorm,
     Refs,
+    ReverseIndex,
     Body,
 }
 
@@ -209,6 +210,7 @@ impl MatchField {
             Self::Translit => 400.0,
             Self::KeyNorm => 350.0,
             Self::Refs => 200.0,
+            Self::ReverseIndex => 150.0,
             Self::Body => 0.0,
         }
     }
@@ -224,6 +226,7 @@ impl MatchField {
             Self::Translit => "translit",
             Self::KeyNorm => "key_norm",
             Self::Refs => "refs",
+            Self::ReverseIndex => "reverse_index",
             Self::Body => "body",
         }
     }
@@ -337,7 +340,7 @@ pub fn default_index_dir() -> Option<PathBuf> {
     default_data_dir().map(|dir| dir.join("lexicon-index"))
 }
 
-fn ensure_outside_repository(dir: &Path) -> Result<(), LexiconError> {
+pub(crate) fn ensure_outside_repository(dir: &Path) -> Result<(), LexiconError> {
     let absolute = if dir.is_absolute() {
         dir.to_path_buf()
     } else {
@@ -840,6 +843,7 @@ pub struct LexiconIndex {
     reader: IndexReader,
     f: Fields,
     links_db: Option<PathBuf>,
+    reverse_db: Option<PathBuf>,
     path_to_id: HashMap<String, String>,
 }
 
@@ -882,6 +886,7 @@ impl LexiconIndex {
             reader,
             f,
             links_db: None,
+            reverse_db: None,
             path_to_id,
         })
     }
@@ -889,6 +894,12 @@ impl LexiconIndex {
     /// Usa o arquivo de ligações (E1a.1) nas consultas Strong, se existir.
     pub fn with_links(mut self, path: impl Into<PathBuf>) -> Self {
         self.links_db = Some(path.into());
+        self
+    }
+
+    /// Usa o índice reverso palavra → Strong (E1b.1) nas consultas em latim, se existir.
+    pub fn with_reverse(mut self, path: impl Into<PathBuf>) -> Self {
+        self.reverse_db = Some(path.into());
         self
     }
 
@@ -1226,6 +1237,15 @@ impl LexiconIndex {
                 }),
             }
         }
+        if let Some(sug_group) =
+            self.reverse_suggestions(&interpretations, limit, filters, &searcher, &mut notes)?
+        {
+            let body_pos = groups
+                .iter()
+                .position(|g| g.hits.iter().all(|h| h.field == MatchField::Body))
+                .unwrap_or(groups.len());
+            groups.insert(body_pos, sug_group);
+        }
         Ok(SearchResults {
             interpretations,
             total,
@@ -1233,6 +1253,72 @@ impl LexiconIndex {
             groups,
             notes,
         })
+    }
+
+    fn reverse_suggestions(
+        &self,
+        interpretations: &[Query],
+        limit: usize,
+        filters: &SearchFilters,
+        searcher: &tantivy::Searcher,
+        notes: &mut Vec<String>,
+    ) -> Result<Option<ModuleHits>, LexiconError> {
+        let Some(db) = self.reverse_db.as_ref().filter(|p| p.exists()) else {
+            return Ok(None);
+        };
+        if !filters.kinds.is_empty() && !filters.kinds.contains(&LexKind::Strong) {
+            return Ok(None);
+        }
+        let latin_word = interpretations.iter().find_map(|q| match q {
+            Query::Latin(w) if !w.trim().contains(char::is_whitespace) => Some(w.as_str()),
+            _ => None,
+        });
+        let Some(word) = latin_word else {
+            return Ok(None);
+        };
+        let suggestions =
+            match crate::ReverseIndex::open(db).and_then(|r| r.suggest_strongs(word, limit)) {
+                Ok(s) => s,
+                Err(error) => {
+                    notes.push(format!("Índice reverso indisponível: {error}"));
+                    return Ok(None);
+                }
+            };
+        let mut hits = Vec::new();
+        for sug in suggestions {
+            let q = self.filtered(
+                all(vec![
+                    term(self.f.kind, LexKind::Strong.as_str()),
+                    term(self.f.key_norm, &sug.strong),
+                ]),
+                filters,
+            );
+            let found = searcher.search(&*q, &TopDocs::with_limit(1).order_by_score())?;
+            if let Some((_, addr)) = found.first() {
+                let doc: TantivyDocument = searcher.doc(*addr)?;
+                let key = doc
+                    .get_first(self.f.key)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&sug.strong)
+                    .to_string();
+                hits.push(SearchHit {
+                    key,
+                    field: MatchField::ReverseIndex,
+                    score: MatchField::ReverseIndex.base() + (sug.dice as f32) * 40.0,
+                    interpretation: format!("latino:{word}"),
+                    provenance: Some(format!("reverse_index (Dice {:.3})", sug.dice)),
+                });
+            }
+        }
+        if hits.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(ModuleHits {
+                module_id: "sugestões por palavra".into(),
+                kind: LexKind::Strong,
+                hits,
+            }))
+        }
     }
 }
 

@@ -11,7 +11,8 @@ Referências: [plano](06-plano-exegese.md) e [inventário E0](07-inventario-exeg
 - E1a.1: concluído — núcleo lexical, extração e ligações locais; detalhes e limites em [09-indice-lexical.md](09-indice-lexical.md).
 - E1a.2: concluído — índice de léxicos (tantivy), busca e CLI; detalhes em [09-indice-lexical.md](09-indice-lexical.md).
 - E1a.3: concluído — decodificador HTML, desempate por tipo e total real; ver [09-indice-lexical.md](09-indice-lexical.md).
-- E1b: pendente — índice reverso e interface.
+- E1b.1: concluído — índice reverso palavra → Strong e integração na busca; ver [09-indice-lexical.md](09-indice-lexical.md).
+- E1b.2: pendente — interface: modo "léxico" na barra Ctrl+K e campo na aba Léxico.
 - E2a: pendente — painel de palavra.
 - E2b: pendente — interlinear.
 - E3: pendente — textos originais e morfologia.

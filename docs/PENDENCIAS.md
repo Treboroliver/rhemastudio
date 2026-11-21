@@ -16,3 +16,4 @@
 - Teste de 1.000 blocos da UI é lento e fica fora da suíte padrão (`RHEMA_SLOW_TESTS=1`).
 - Busca lexical sem stemming: "amor" não encontra "amores" e "amores" não encontra "amor" (apenas correspondência sem acentos).
 - Decodificador HTML (`convert_html`) extrai texto e parágrafos sem preservar formatação inline (negrito, itálico, links).
+- Índice reverso palavra → Strong tokeniza apenas palavras latinas; Bíblias originais com Strong (`tr(gr).nt`, `tra.nt`, `tanakh+.ot`) não entram no índice reverso.
