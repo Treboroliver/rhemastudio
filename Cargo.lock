@@ -121,6 +121,7 @@ dependencies = [
  "gen-fixtures",
  "log",
  "rhema-core",
+ "rhema-lexicon",
  "rhema-library",
  "rhema-refs",
  "rhema-sermon",
