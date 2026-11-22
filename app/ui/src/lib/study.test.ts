@@ -569,4 +569,114 @@ describe('painel de estudo', () => {
     await new Promise((resolve) => setTimeout(resolve, 250))
     expect(invokeMock).not.toHaveBeenCalled()
   })
+
+  it('renderiza link inline sem quebrar parágrafo e exibe módulo · código em erro de comentário', async () => {
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_commentary_index') {
+        return {
+          book: 1,
+          chapter: 24,
+          verse: 1,
+          modules: [
+            {
+              module_id: 'w1',
+              module_title: 'Wiersbe',
+              error: null,
+              entries: [
+                {
+                  topic_id: 24,
+                  scope: 'chapter',
+                  label: 'Capítulo 24',
+                  chapter: 24,
+                  from_verse: 1,
+                  to_verse: 67,
+                  size_bytes: 100,
+                  content_type: 'rtf',
+                  supported: true
+                }
+              ]
+            },
+            {
+              module_id: 'n1',
+              module_title: 'NICOT',
+              error: { code: 'module_corrupted', message: 'falha' },
+              entries: []
+            }
+          ]
+        }
+      }
+      if (cmd === 'get_commentary_entry') {
+        return {
+          module_id: 'w1',
+          topic_id: 24,
+          nodes: [
+            { type: 'text', value: 'Veja ' },
+            {
+              type: 'verseLink',
+              book: 43,
+              chapter: 3,
+              verse: 16,
+              children: [{ type: 'text', value: 'Jo 3:16' }]
+            },
+            { type: 'text', value: ' no texto.' }
+          ],
+          has_more: false,
+          degraded: false,
+          next_offset: 0
+        }
+      }
+      return null
+    })
+
+    const { container } = render(CommentaryTab, {
+      props: {
+        t,
+        selection: { book: 1, chapter: 24, verse: 1 },
+        commentaries: [
+          {
+            id: 'w1',
+            path: 'w.twm',
+            kind: 'Commentary',
+            state: 'Ready',
+            title: 'Wiersbe',
+            abbreviation: null,
+            language: 'pt',
+            language_name: null,
+            description: null,
+            version: null,
+            size: 1,
+            has_strong: false
+          },
+          {
+            id: 'n1',
+            path: 'n.twm',
+            kind: 'Commentary',
+            state: 'Ready',
+            title: 'NICOT',
+            abbreviation: null,
+            language: 'en',
+            language_name: null,
+            description: null,
+            version: null,
+            size: 1,
+            has_strong: false
+          }
+        ],
+        activeIds: ['w1', 'n1'],
+        active: true,
+        onToggle: vi.fn(),
+        onVerse: vi.fn(),
+        onEntry: vi.fn(),
+        onManageFolders: vi.fn()
+      }
+    })
+
+    expect(await screen.findByText('NICOT · module_corrupted')).toBeTruthy()
+    const btn = await screen.findByRole('button', { name: /Capítulo 24/i })
+    await fireEvent.click(btn)
+    const linkBtn = await screen.findByRole('button', { name: 'Jo 3:16' })
+    const paragraphs = container.querySelectorAll('.rich-paragraph')
+    expect(paragraphs).toHaveLength(1)
+    expect(paragraphs[0].contains(linkBtn)).toBe(true)
+  })
 })

@@ -629,3 +629,48 @@ fn indexes_generic_greek_hebrew_mixed_titles_and_explicit_refs() -> Result<(), L
     assert_eq!(index.search("3056", 10, &none)?.total, 0);
     Ok(())
 }
+
+#[test]
+fn excludes_hidden_topics_and_meta_body_from_index() -> Result<(), LexiconError> {
+    let dir = tempfile::tempdir()?;
+    let modules = dir.path().join("modulos");
+    fs::create_dir(&modules)?;
+    let path = modules.join("meta_hidden.dct.twm");
+    let db = rusqlite::Connection::open(&path)?;
+    db.execute_batch(
+        "CREATE TABLE config(name TEXT, value TEXT);
+         CREATE TABLE topics(id INTEGER, subject TEXT, strong_orig_word TEXT, content_type TEXT);
+         CREATE TABLE topics_flags(id INTEGER, hidden INT);
+         CREATE TABLE content(topic_id INTEGER, data BLOB);
+         INSERT INTO config VALUES ('type', '1'), ('content.type', 'rtf');",
+    )?;
+    db.execute(
+        "INSERT INTO topics VALUES (1, 'ALVO', '', 'rtf'), (2, 'ATALHO', '', 'meta'), (3, 'OCULTO', '', 'rtf')",
+        [],
+    )?;
+    db.execute("INSERT INTO topics_flags VALUES (3, 1)", [])?;
+    db.execute(
+        "INSERT INTO content VALUES (1, ?1), (2, ?2), (3, ?3)",
+        [
+            br"{\rtf1 Conteudo exclusivo}".as_slice(),
+            b"meta=_twmgc_\ntype=link\nid=1".as_slice(),
+            br"{\rtf1 Segredo escondido}".as_slice(),
+        ],
+    )?;
+    drop(db);
+
+    let index_dir = dir.path().join("indice");
+    build_index(&index_dir, std::slice::from_ref(&modules), &mut |_| {})?;
+    let index = LexiconIndex::open(&index_dir)?;
+    let none = SearchFilters::default();
+
+    // Tópico oculto não entra no índice
+    assert_eq!(index.search("oculto", 10, &none)?.total, 0);
+    assert_eq!(index.search("segredo", 10, &none)?.total, 0);
+    // Atalho meta entra só pelo título, não pelo corpo do alvo
+    assert_eq!(index.search("atalho", 10, &none)?.total, 1);
+    let excl = index.search("exclusivo", 10, &none)?;
+    assert_eq!(excl.total, 1);
+    assert_eq!(excl.groups[0].hits[0].key, "ALVO");
+    Ok(())
+}

@@ -1,6 +1,8 @@
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::Path;
 
+use flate2::read::ZlibDecoder;
 use rhema_core::{Book, ModuleError, Node, StrongLang, VerseRef};
 use rusqlite::{types::Value, Connection, OpenFlags, OptionalExtension, Row};
 
@@ -53,7 +55,7 @@ impl TwmModule {
         let mut statement = connection
             .prepare(
                 "SELECT name, value FROM config \
-                 WHERE lower(trim(name)) IN ('type', 'content.type', 'title', 'lang')",
+                 WHERE lower(trim(name)) IN ('type', 'content.type', 'title', 'lang', 'user', 'compressed')",
             )
             .map_err(|error| corrupted(format!("leitura de configuração: {error}")))?;
         let mut rows = statement
@@ -93,54 +95,95 @@ impl TwmModule {
     }
 
     fn content_type(&self, row_type: Option<&str>) -> String {
-        let value = match row_type {
-            Some(value) => value.trim(),
-            None => self
-                .config
-                .get("content.type")
-                .map(String::as_str)
-                .unwrap_or_default()
-                .trim(),
-        };
-        if value.is_empty() {
-            "unknown".to_string()
+        if let Some(value) = row_type.map(str::trim).filter(|s| !s.is_empty()) {
+            return value.to_ascii_lowercase();
+        }
+        if let Some(value) = self
+            .config
+            .get("content.type")
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            return value.to_ascii_lowercase();
+        }
+        if self.config.get("user").is_some_and(|v| v.trim() == "1") {
+            "rvf".to_string()
         } else {
-            value.to_ascii_lowercase()
+            "rtf".to_string()
         }
     }
 
-    fn decode_content(
+    fn resolve_meta_target(
+        &self,
+        initial_topic_id: i64,
+        initial_row_type: Option<&str>,
+        lookup_row_type: impl Fn(i64) -> Result<Option<String>, ModuleError>,
+    ) -> Result<(i64, String), ModuleError> {
+        const MAX_META_HOPS: usize = 5;
+        let mut current_id = initial_topic_id;
+        let mut current_ct = self.content_type(initial_row_type);
+        let mut visited = vec![current_id];
+
+        for _ in 0..MAX_META_HOPS {
+            if current_ct != "meta" {
+                return Ok((current_id, current_ct));
+            }
+            let bytes = self.read_content_bytes(current_id)?;
+            let next_id = parse_meta_shortcut(&bytes)?;
+            if visited.contains(&next_id) {
+                return Err(ModuleError::Corrupted(
+                    "meta_cycle: ciclo detectado em atalho meta".to_string(),
+                ));
+            }
+            visited.push(next_id);
+            let next_row_type = lookup_row_type(next_id)?;
+            current_ct = self.content_type(next_row_type.as_deref());
+            current_id = next_id;
+        }
+        if current_ct == "meta" {
+            return Err(ModuleError::Corrupted(
+                "meta_depth: limite de saltos excedido em atalho meta".to_string(),
+            ));
+        }
+        Ok((current_id, current_ct))
+    }
+
+    fn decode_content_resolved(
         &self,
         topic_id: i64,
         row_type: Option<&str>,
+        lookup_row_type: impl Fn(i64) -> Result<Option<String>, ModuleError>,
     ) -> Result<crate::DecodedContent, ModuleError> {
-        let content_type = self.content_type(row_type);
+        let (resolved_id, content_type) =
+            self.resolve_meta_target(topic_id, row_type, lookup_row_type)?;
         if !matches!(
             content_type.as_str(),
             "rtf" | "rvf" | "html" | "" | "unknown" | "txt" | "text"
         ) {
             return Err(ModuleError::UnsupportedContent(content_type));
         }
-        let bytes = self.read_content_bytes(topic_id)?;
+        let bytes = self.read_content_bytes(resolved_id)?;
         crate::decode_twm_content_checked(&content_type, &bytes)
     }
 
-    fn decode_content_page(
+    fn decode_content_page_resolved(
         &self,
         topic_id: i64,
         row_type: Option<&str>,
         offset: u64,
         max_paragraphs: usize,
         max_chars: usize,
+        lookup_row_type: impl Fn(i64) -> Result<Option<String>, ModuleError>,
     ) -> Result<RtfPage, ModuleError> {
-        let content_type = self.content_type(row_type);
+        let (resolved_id, content_type) =
+            self.resolve_meta_target(topic_id, row_type, lookup_row_type)?;
         if !matches!(
             content_type.as_str(),
             "rtf" | "rvf" | "html" | "" | "unknown" | "txt" | "text"
         ) {
             return Err(ModuleError::UnsupportedContent(content_type));
         }
-        let bytes = self.read_content_bytes(topic_id)?;
+        let bytes = self.read_content_bytes(resolved_id)?;
         crate::decode_twm_content_page(&content_type, &bytes, offset, max_paragraphs, max_chars)
     }
 
@@ -171,16 +214,44 @@ impl TwmModule {
             .ok_or_else(|| {
                 ModuleError::Corrupted(format!("Conteúdo ausente para id {topic_id}"))
             })?;
-        match data {
-            Value::Text(text) => Ok(text.into_bytes()),
-            Value::Blob(bytes) => Ok(bytes),
-            Value::Null => Err(ModuleError::Corrupted(format!(
-                "Conteúdo NULL para id {topic_id}"
-            ))),
-            _ => Err(ModuleError::Corrupted(format!(
-                "Tipo SQLite de conteúdo inválido para id {topic_id}"
-            ))),
+        let raw = match data {
+            Value::Text(text) => text.into_bytes(),
+            Value::Blob(bytes) => bytes,
+            Value::Null => {
+                return Err(ModuleError::Corrupted(format!(
+                    "Conteúdo NULL para id {topic_id}"
+                )));
+            }
+            _ => {
+                return Err(ModuleError::Corrupted(format!(
+                    "Tipo SQLite de conteúdo inválido para id {topic_id}"
+                )));
+            }
+        };
+        let is_compressed = self
+            .config
+            .get("compressed")
+            .is_some_and(|v| v.trim() == "1");
+        let looks_zlib =
+            raw.len() >= 2 && raw[0] == 0x78 && matches!(raw[1], 0x01 | 0x5E | 0x9C | 0xDA);
+        if is_compressed && looks_zlib {
+            let mut decoder = ZlibDecoder::new(raw.as_slice());
+            let mut out = Vec::new();
+            decoder.read_to_end(&mut out).map_err(|error| {
+                ModuleError::Corrupted(format!(
+                    "Descompressão zlib falhou para id {topic_id}: {error}"
+                ))
+            })?;
+            return Ok(out);
         }
+        if !is_compressed && looks_zlib {
+            let mut decoder = ZlibDecoder::new(raw.as_slice());
+            let mut out = Vec::new();
+            if decoder.read_to_end(&mut out).is_ok() {
+                return Ok(out);
+            }
+        }
+        Ok(raw)
     }
 
     fn validate_table(&self, table: &str, required: &[&str]) -> Result<(), ModuleError> {
@@ -348,9 +419,11 @@ impl CommentarySource {
             .matching(verse)?
             .into_iter()
             .map(|entry| {
-                let decoded = self
-                    .module
-                    .decode_content(entry.topic_id, entry.content_type.as_deref());
+                let decoded = self.module.decode_content_resolved(
+                    entry.topic_id,
+                    entry.content_type.as_deref(),
+                    |id| self.row_content_type(id),
+                );
                 CommentaryEntry {
                     topic_id: entry.topic_id,
                     bi: entry.book.number(),
@@ -379,7 +452,10 @@ impl CommentarySource {
                     fvi: entry.from_verse,
                     tvi: entry.to_verse,
                     scope: scope_for(entry),
-                    supported: matches!(content_type.as_str(), "rtf" | "rvf"),
+                    supported: matches!(
+                        content_type.as_str(),
+                        "rtf" | "rvf" | "html" | "txt" | "text" | "meta"
+                    ),
                     content_type,
                     size_bytes: self.module.content_size(entry.topic_id)?,
                 })
@@ -400,13 +476,35 @@ impl CommentarySource {
             .get(&topic_id)
             .and_then(|index| self.refs.get(*index))
             .ok_or_else(|| ModuleError::NotFound(format!("entrada {topic_id}")))?;
-        self.module.decode_content_page(
+        self.module.decode_content_page_resolved(
             entry.topic_id,
             entry.content_type.as_deref(),
             offset,
             max_paragraphs,
             max_chars,
+            |id| self.row_content_type(id),
         )
+    }
+
+    fn row_content_type(&self, topic_id: i64) -> Result<Option<String>, ModuleError> {
+        if let Some(r) = self
+            .by_topic
+            .get(&topic_id)
+            .and_then(|idx| self.refs.get(*idx))
+        {
+            return Ok(r.content_type.clone());
+        }
+        let ct: Option<Option<String>> = self
+            .module
+            .connection
+            .query_row(
+                "SELECT content_type FROM bible_refs WHERE topic_id = ?1 LIMIT 1",
+                [topic_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(corrupted)?;
+        Ok(ct.flatten())
     }
 }
 
@@ -432,6 +530,7 @@ pub struct DictionarySource {
     module: TwmModule,
     has_strong_orig_word: bool,
     has_content_type: bool,
+    has_topics_flags: bool,
 }
 
 impl DictionarySource {
@@ -456,10 +555,12 @@ impl DictionarySource {
         };
         let has_strong_orig_word = has_col("strong_orig_word")?;
         let has_content_type = has_col("content_type")?;
+        let has_topics_flags = module.table_exists("topics_flags")?;
         Ok(Self {
             module,
             has_strong_orig_word,
             has_content_type,
+            has_topics_flags,
         })
     }
 
@@ -513,9 +614,14 @@ impl DictionarySource {
         let escaped = escape_like(prefix);
         let pattern = format!("{escaped}%");
         let cols = self.topic_columns("");
+        let hidden_filter = if self.has_topics_flags {
+            " AND NOT EXISTS (SELECT 1 FROM topics_flags tf WHERE tf.id = topics.id AND tf.hidden = 1)"
+        } else {
+            ""
+        };
         let sql = format!(
             "SELECT {cols} FROM topics \
-             WHERE subject LIKE ?1 ESCAPE '\\' COLLATE NOCASE \
+             WHERE subject LIKE ?1 ESCAPE '\\' COLLATE NOCASE{hidden_filter} \
              ORDER BY subject COLLATE NOCASE LIMIT ?2"
         );
         let mut statement = self.module.connection.prepare(&sql).map_err(corrupted)?;
@@ -546,10 +652,15 @@ impl DictionarySource {
         self.module
             .validate_table("topics_wordindex", &["id", "word", "priority"])?;
         let cols = self.topic_columns("t.");
+        let hidden_filter = if self.has_topics_flags {
+            " AND NOT EXISTS (SELECT 1 FROM topics_flags tf WHERE tf.id = t.id AND tf.hidden = 1)"
+        } else {
+            ""
+        };
         let sql = format!(
             "SELECT {cols} \
              FROM topics_wordindex w JOIN topics t ON t.id = w.id \
-             WHERE w.word = ?1 COLLATE NOCASE \
+             WHERE w.word = ?1 COLLATE NOCASE{hidden_filter} \
              GROUP BY t.id, t.subject \
              ORDER BY MAX(w.priority) DESC, t.subject COLLATE NOCASE LIMIT ?2"
         );
@@ -566,9 +677,11 @@ impl DictionarySource {
     }
 
     fn load_entry(&self, entry: DictionaryRef) -> Result<DictionaryEntry, ModuleError> {
-        let decoded = self
-            .module
-            .decode_content(entry.topic_id, entry.content_type.as_deref());
+        let decoded = self.module.decode_content_resolved(
+            entry.topic_id,
+            entry.content_type.as_deref(),
+            |id| self.row_content_type(id),
+        );
         Ok(DictionaryEntry {
             topic_id: entry.topic_id,
             subject: entry.subject,
@@ -577,6 +690,57 @@ impl DictionarySource {
             content: decoded.map(|decoded| decoded.nodes),
         })
     }
+
+    fn row_content_type(&self, topic_id: i64) -> Result<Option<String>, ModuleError> {
+        if !self.has_content_type {
+            return Ok(None);
+        }
+        let ct: Option<Option<String>> = self
+            .module
+            .connection
+            .query_row(
+                "SELECT content_type FROM topics WHERE id = ?1 LIMIT 1",
+                [topic_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(corrupted)?;
+        Ok(ct.flatten())
+    }
+}
+
+fn parse_meta_shortcut(bytes: &[u8]) -> Result<i64, ModuleError> {
+    let text = String::from_utf8_lossy(bytes);
+    let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
+    let Some(first) = lines.next() else {
+        return Err(ModuleError::Corrupted(
+            "meta_invalid: tópico meta vazio".to_string(),
+        ));
+    };
+    if !first.eq_ignore_ascii_case("meta=_twmgc_") {
+        return Err(ModuleError::Corrupted(
+            "meta_invalid: cabeçalho meta=_twmgc_ ausente".to_string(),
+        ));
+    }
+    let mut is_link = false;
+    let mut target_id: Option<i64> = None;
+    for line in lines {
+        if let Some((k, v)) = line.split_once('=') {
+            let key = k.trim();
+            let val = v.trim();
+            if key.eq_ignore_ascii_case("type") && val.eq_ignore_ascii_case("link") {
+                is_link = true;
+            } else if key.eq_ignore_ascii_case("id") {
+                target_id = val.parse::<i64>().ok();
+            }
+        }
+    }
+    if let (true, Some(id)) = (is_link, target_id) {
+        return Ok(id);
+    }
+    Err(ModuleError::Corrupted(
+        "meta_invalid: atalho meta sem type=link ou id válido".to_string(),
+    ))
 }
 
 pub fn strong_key(lang: StrongLang, number: u32) -> String {
@@ -636,9 +800,6 @@ fn module_kind(
             |r| r.get(0),
         )
         .unwrap_or(false);
-    if filename.ends_with(".dct.twm") && has_topics && !has_bible_refs {
-        return Ok(TwmKind::Dictionary);
-    }
     let declared = config
         .get("type")
         .map(|value| value.trim().to_ascii_lowercase());
@@ -646,12 +807,18 @@ fn module_kind(
         Some("1" | "dct" | "dictionary") => return Ok(TwmKind::Dictionary),
         Some("2" | "cmt" | "commentary") => return Ok(TwmKind::Commentary),
         Some("3" | "gbk" | "book" | "4" | "dev") => {
+            if filename.ends_with(".dct.twm") && has_topics && !has_bible_refs {
+                return Ok(TwmKind::Dictionary);
+            }
             return Err(ModuleError::UnsupportedFormat(format!(
                 "Módulo fora do escopo M1.4: {}",
                 declared.unwrap_or_default()
-            )))
+            )));
         }
         _ => {}
+    }
+    if filename.ends_with(".dct.twm") && has_topics && !has_bible_refs {
+        return Ok(TwmKind::Dictionary);
     }
     let filename = path.to_string_lossy().to_ascii_lowercase();
     if filename.ends_with(".cmt.twm") {
@@ -1328,5 +1495,118 @@ mod tests {
                 prop_assert!(result.is_ok() || matches!(result, Err(ModuleError::InvalidReference(_))));
             }
         }
+    }
+
+    #[test]
+    fn resolves_meta_shortcuts_cycles_hidden_topics_and_zlib_compression() {
+        use flate2::{write::ZlibEncoder, Compression};
+        use std::io::Write;
+
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("meta_hidden_zlib.twm");
+        let conn = Connection::open(&path).expect("criar sqlite");
+        conn.execute_batch(
+            "CREATE TABLE config (name TEXT, value TEXT);
+             CREATE TABLE topics (id INTEGER PRIMARY KEY, subject TEXT, content_type TEXT);
+             CREATE TABLE topics_flags (id INTEGER PRIMARY KEY, hidden INT);
+             CREATE TABLE topics_wordindex (id INTEGER, word TEXT, priority INT);
+             CREATE TABLE content (topic_id INTEGER PRIMARY KEY, data BLOB);
+             INSERT INTO config (name, value) VALUES ('type', '1'), ('compressed', '1'), ('user', '0');",
+        )
+        .expect("schema");
+
+        let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
+        enc.write_all(br"{\rtf1 Alvo comprimido}")
+            .expect("write zlib");
+        let compressed_rtf = enc.finish().expect("finish zlib");
+
+        conn.execute(
+            "INSERT INTO topics (id, subject, content_type) VALUES (1, 'ALVO', NULL)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO content (topic_id, data) VALUES (1, ?1)",
+            [compressed_rtf],
+        )
+        .unwrap();
+
+        // Atalho meta válido -> 1
+        conn.execute(
+            "INSERT INTO topics (id, subject, content_type) VALUES (2, 'ATALHO', 'meta')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO content (topic_id, data) VALUES (2, 'meta=_twmgc_\ntype=link\nid=1\nanchor=x')",
+            [],
+        )
+        .unwrap();
+
+        // Ciclo meta: 3 -> 4 -> 3
+        conn.execute(
+            "INSERT INTO topics (id, subject, content_type) VALUES (3, 'CICLO1', 'meta'), (4, 'CICLO2', 'meta')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO content (topic_id, data) VALUES (3, 'meta=_twmgc_\ntype=link\nid=4'), (4, 'meta=_twmgc_\ntype=link\nid=3')",
+            [],
+        )
+        .unwrap();
+
+        // Tópico oculto
+        conn.execute(
+            "INSERT INTO topics (id, subject, content_type) VALUES (5, 'OCULTO', 'rtf')",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO topics_flags (id, hidden) VALUES (5, 1)", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO topics_wordindex (id, word, priority) VALUES (5, 'segredo', 10), (1, 'segredo', 5)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO content (topic_id, data) VALUES (5, ?1)",
+            [br"{\rtf1 Texto oculto}".as_slice()],
+        )
+        .unwrap();
+        drop(conn);
+
+        let src = DictionarySource::open(&path).expect("abrir dicionário sem extensão .dct");
+        // Zlib + default rtf (user=0)
+        let alvo = src.lookup("ALVO").expect("lookup").expect("existe");
+        assert_eq!(
+            crate::plain_text(&alvo.content.expect("decodificado")),
+            "Alvo comprimido"
+        );
+        // Meta shortcut
+        let atalho = src.lookup("ATALHO").expect("lookup").expect("existe");
+        assert_eq!(
+            crate::plain_text(&atalho.content.expect("meta resolvido")),
+            "Alvo comprimido"
+        );
+        // Meta cycle
+        let ciclo = src.lookup("CICLO1").expect("lookup").expect("existe");
+        assert!(matches!(
+            ciclo.content,
+            Err(ModuleError::Corrupted(ref msg)) if msg.contains("meta_cycle")
+        ));
+        // Hidden: fora de prefix_search e search_word, mas abre direto
+        let pref = src.prefix_search("OCUL", 10).expect("prefix");
+        assert!(pref.is_empty());
+        let word_hits = src.search_word("segredo", 10).expect("word");
+        assert_eq!(word_hits.len(), 1);
+        assert_eq!(word_hits[0].topic_id, 1);
+        let direto = src
+            .lookup("OCULTO")
+            .expect("lookup direto")
+            .expect("existe");
+        assert_eq!(
+            crate::plain_text(&direto.content.expect("oculto direto")),
+            "Texto oculto"
+        );
     }
 }

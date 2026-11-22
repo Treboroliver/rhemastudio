@@ -82,5 +82,7 @@ As taxas não demonstram equivalência semântica; as ligações preservam prove
 - `INDEX_SCHEMA_VERSION = 2` guarda `topic_id` e aplica `clean_title`; `lookup_by_id` abre o verbete sem `key.trim()`, e `library_scan` tolera pastas ausentes (`library:warnings` + `Remover`).
 
 ## E1b.4 — Abertura universal, lemas comuns e relacionados
-- **Correções:** `DictionarySource::open` exige só `(id, subject)` em `topics` (antes exigia `strong_orig_word`/`content_type`), `rhema-library`/`twm.rs` aceitam `.dct.twm` com `type=2/3` (`topics` sem `bible_refs`), e `unknown` (sem `content.type`) lê como texto simples. Nos testes do app, os 10 módulos antes com `0` aberturas passaram a `100%` (`VINE` 1 `ok` + 1 `entry_empty`).
-- **Índice (`v3`) e `lex_related`:** genéricos indexam títulos gregos/hebraicos/mistos em `lemma`/`lemma_norm`/`translit_greek` e citações explícitas de Strong em `refs`. `lex_related` + `"Outros dicionários (N)"` na aba Léxico (`G25`: 6/3 mód., `G3056`: 28/4 mód., `H430`: 2/2 mód.). Construção 53.238 ms, 19.656.949 bytes; 200 consultas p50 1,91 ms, p95 11,38 ms.
+- `DictionarySource::open` exige só `(id, subject)`, `rhema-library`/`twm.rs` aceitam `.dct.twm` com `type=2/3` (`topics` sem `bible_refs`), e `unknown` lê como texto simples (`100%` dos 10 módulos antes falhando). Genéricos (`v3`) indexam lemas gregos/hebraicos/mistos e refs Strong; `lex_related` + `"Outros dicionários (N)"` (`G25`: 6/3, `G3056`: 28/4, `H430`: 2/2; build 53.238 ms, 19,7 MB, p50 1,91 ms).
+
+## E1b.5 — Links inline, zlib, meta, ocultos e erros de comentário
+- RTF `\field` isola `\fldrslt` sem `\par` interno e renderiza inline; `twm.rs` descomprime zlib (`compressed=1`), segue `config.type` → extensão e `content_type` → `config.content.type` → `user=1?rvf:rtf`, resolve atalhos `meta` (≤5 saltos, sem duplicar corpo no índice) e oculta `topics_flags.hidden=1` das listas/índice; erros de comentário exibem `"módulo · código"` e gravam em `lex-errors.log`.

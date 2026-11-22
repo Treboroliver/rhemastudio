@@ -44,7 +44,9 @@ struct Frame {
     nodes: Vec<Node>,
     destination: Destination,
     field: bool,
+    field_result: bool,
     field_instruction: Option<String>,
+    fldrslt_nodes: Option<Vec<Node>>,
     ignorable: bool,
 }
 
@@ -59,7 +61,9 @@ impl Frame {
             nodes: Vec::new(),
             destination: Destination::Normal,
             field: false,
+            field_result: false,
             field_instruction: None,
+            fldrslt_nodes: None,
             ignorable: false,
         }
     }
@@ -70,7 +74,9 @@ impl Frame {
             nodes: Vec::new(),
             destination: self.destination,
             field: false,
+            field_result: false,
             field_instruction: None,
+            fldrslt_nodes: None,
             ignorable: false,
         }
     }
@@ -493,6 +499,7 @@ impl Parser<'_> {
             "fldrslt" => {
                 self.current().destination = Destination::Normal;
                 self.current().ignorable = false;
+                self.current().field_result = true;
             }
             "fcharset" => {}
             _ => {
@@ -681,19 +688,21 @@ impl Parser<'_> {
             parent.field_instruction = frame.field_instruction;
             return;
         }
+        if frame.field_result && parent.field {
+            parent
+                .fldrslt_nodes
+                .get_or_insert_with(Vec::new)
+                .extend(frame.nodes);
+            return;
+        }
         if frame.field {
             let instruction = frame
                 .field_instruction
                 .or_else(|| parent.field_instruction.take())
                 .unwrap_or_default();
             let target = parse_link_target(&instruction);
-            if frame.nodes.is_empty() {
-                return;
-            }
-            parent.nodes.push(Node::Link {
-                target,
-                children: frame.nodes,
-            });
+            let raw_children = frame.fldrslt_nodes.unwrap_or(frame.nodes);
+            push_link_without_paragraphs(target, raw_children, &mut parent.nodes);
         } else {
             if let Some(instruction) = frame.field_instruction {
                 parent.field_instruction = Some(instruction);
@@ -701,6 +710,51 @@ impl Parser<'_> {
             parent.nodes.extend(frame.nodes);
         }
     }
+}
+
+/// Garante que `Node::Link` contenha apenas o rótulo em linha, sem `Node::Paragraph` interno.
+fn push_link_without_paragraphs(target: LinkTarget, mut children: Vec<Node>, out: &mut Vec<Node>) {
+    let mut leading_pars = 0usize;
+    while matches!(children.first(), Some(Node::Paragraph)) {
+        children.remove(0);
+        leading_pars += 1;
+    }
+    let mut trailing_pars = 0usize;
+    while matches!(children.last(), Some(Node::Paragraph)) {
+        children.pop();
+        trailing_pars += 1;
+    }
+    let cleaned = strip_inner_paragraphs(children);
+    for _ in 0..leading_pars {
+        out.push(Node::Paragraph);
+    }
+    if !cleaned.is_empty() {
+        out.push(Node::Link {
+            target,
+            children: cleaned,
+        });
+    }
+    for _ in 0..trailing_pars {
+        out.push(Node::Paragraph);
+    }
+}
+
+fn strip_inner_paragraphs(nodes: Vec<Node>) -> Vec<Node> {
+    let mut out = Vec::with_capacity(nodes.len());
+    for node in nodes {
+        match node {
+            Node::Paragraph => out.push(Node::Text(" ".to_string())),
+            Node::Bold(c) => out.push(Node::Bold(strip_inner_paragraphs(c))),
+            Node::Italic(c) => out.push(Node::Italic(strip_inner_paragraphs(c))),
+            Node::Underline(c) => out.push(Node::Underline(strip_inner_paragraphs(c))),
+            Node::Strikethrough(c) => out.push(Node::Strikethrough(strip_inner_paragraphs(c))),
+            Node::Caps(c) => out.push(Node::Caps(strip_inner_paragraphs(c))),
+            Node::Superscript(c) => out.push(Node::Superscript(strip_inner_paragraphs(c))),
+            Node::Subscript(c) => out.push(Node::Subscript(strip_inner_paragraphs(c))),
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 fn hex_pair(high: u8, low: u8) -> Option<u8> {
@@ -737,10 +791,24 @@ pub struct DecodedContent {
     pub degraded: bool,
 }
 
+fn maybe_decompress_zlib(input: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    if input.len() >= 2 && input[0] == 0x78 && matches!(input[1], 0x01 | 0x5E | 0x9C | 0xDA) {
+        use std::io::Read;
+        let mut dec = flate2::read::ZlibDecoder::new(input);
+        let mut out = Vec::new();
+        if dec.read_to_end(&mut out).is_ok() {
+            return std::borrow::Cow::Owned(out);
+        }
+    }
+    std::borrow::Cow::Borrowed(input)
+}
+
 pub fn decode_twm_content_checked(
     content_type: &str,
     input: &[u8],
 ) -> Result<DecodedContent, ModuleError> {
+    let input = maybe_decompress_zlib(input);
+    let input = input.as_ref();
     match content_type {
         "rtf" => convert_rtf(input).map(|nodes| DecodedContent {
             nodes,
@@ -813,6 +881,8 @@ pub fn decode_twm_content_page(
     max_paragraphs: usize,
     max_chars: usize,
 ) -> Result<RtfPage, ModuleError> {
+    let input = maybe_decompress_zlib(input);
+    let input = input.as_ref();
     match content_type {
         "rtf" => convert_rtf_page(input, offset, max_paragraphs, max_chars),
         "rvf" => {
@@ -998,6 +1068,39 @@ mod tests {
                 ..
             } if key == "G25"
         )));
+    }
+
+    #[test]
+    fn link_label_isolates_fldrslt_strips_par_and_supports_nested_links() {
+        // Rótulo curto com texto antes/depois e \par ao redor e dentro
+        let nodes = convert_rtf(
+            br#"{\rtf1 Antes \par {\field{\*\fldinst HYPERLINK "tw://bible.*?id=43.3.16|_AUTODETECT_|"}texto fora{\fldrslt Jo 3:16\par }}\par Depois}"#,
+        )
+        .expect("rtf válido");
+        let links: Vec<_> = nodes
+            .iter()
+            .filter_map(|n| match n {
+                Node::Link { children, .. } => Some(plain_text(children)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(links, vec!["Jo 3:16"]);
+        assert!(!nodes.iter().any(|n| matches!(
+            n,
+            Node::Link { children, .. } if children.iter().any(|c| matches!(c, Node::Paragraph))
+        )));
+
+        // Links aninhados
+        let nested = convert_rtf(
+            br#"{\rtf1 {\field{\*\fldinst HYPERLINK "tw://bible.*?id=1.1.1"}{\fldrslt Gn {\field{\*\fldinst HYPERLINK "_STRONG_H430"}{\fldrslt 1:1}}}}}"#,
+        )
+        .expect("rtf aninhado");
+        assert_eq!(plain_text(&nested), "Gn 1:1");
+        assert!(matches!(
+            &nested[0],
+            Node::Link { children, .. }
+                if children.iter().any(|c| matches!(c, Node::Link { target: LinkTarget::Dictionary(k), .. } if k == "H430"))
+        ));
     }
 
     #[test]

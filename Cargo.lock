@@ -3323,6 +3323,7 @@ name = "rhema-twformat"
 version = "0.1.0"
 dependencies = [
  "encoding_rs",
+ "flate2",
  "gen-fixtures",
  "insta",
  "memchr",

@@ -18,6 +18,10 @@
 - Decodificador HTML (`convert_html`) extrai texto e parágrafos sem preservar formatação inline (negrito, itálico, links).
 - Índice reverso palavra → Strong tokeniza apenas palavras latinas; Bíblias originais com Strong (`tr(gr).nt`, `tra.nt`, `tanakh+.ot`) não entram no índice reverso.
 - Alguns módulos têm entradas com `content.data IS NULL` no próprio arquivo (`VINE`, `EnciclopédiaTematica`, `DChamplin`, `NDT`), exibidas como verbete vazio (`entry_empty`).
+- Módulos híbridos (`rel_refs`: livro com tabela de ligações entre tópicos e versículos/faixas bíblicas) estão fora do escopo atual.
+- Módulos devocionais (`devotion`: entradas diárias indexadas por mês e dia) estão fora do escopo atual.
+- Módulos de mapas (`config.type=4`: imagens/mapas e regiões interativas) estão fora do escopo atual.
+- Criação e edição de módulos próprios (geração de novos `.twm`/`.ont` no formato oficial) estão fora do escopo atual.
 
 ## Ideias futuras (pedidas por Robert)
 

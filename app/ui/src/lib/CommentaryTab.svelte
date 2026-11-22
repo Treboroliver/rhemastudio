@@ -181,6 +181,7 @@
               <h3>{module.module_title}</h3>
               {#if module.error}
                 <p class="entry-notice" role="status">{moduleErrorText(module.error.code)}</p>
+                <p class="panel-note error-meta">{module.module_title} · {module.error.code}</p>
               {/if}
               {#each module.entries as entry (entry.topic_id)}
                 {@const key = entryKey(module, entry)}
@@ -199,6 +200,7 @@
                   </button>
                   {#if !entry.supported}
                     <p class="entry-notice" role="status">{t('commentaryUnsupported')}</p>
+                    <p class="panel-note error-meta">{module.module_title} · {entry.content_type || 'unsupported_format'}</p>
                   {:else if open[key]}
                     <div class="entry-body" id={`entry-${key}`}>
                       {#if page}
@@ -212,8 +214,10 @@
                           <p class="panel-note" role="status">{t('commentaryLoading')}</p>
                         {:else if page.errorCode === 'unsupported_format'}
                           <p class="entry-notice" role="status">{t('commentaryUnsupported')}</p>
+                          <p class="panel-note error-meta">{module.module_title} · {entry.content_type || page.errorCode}</p>
                         {:else if page.errorCode}
                           <p class="entry-notice" role="alert">{t('commentaryError')}</p>
+                          <p class="panel-note error-meta">{module.module_title} · {page.errorCode}</p>
                           <button type="button" class="quiet" onclick={() => loadPage(module, entry, page.nextOffset)}>{t('retry')}</button>
                         {:else if page.hasMore}
                           <button type="button" class="quiet show-more" onclick={() => loadPage(module, entry, page.nextOffset)}>{t('commentaryMore')}</button>

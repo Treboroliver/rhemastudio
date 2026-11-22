@@ -238,3 +238,11 @@ Desempenho (release, Rust, todos os 1.189 capítulos, sem erros e sem `<`/`>` ap
 - [x] Como Strong grego/hebraico é nomeado nas chaves do dicionário — Confirmado (`G{n}` e `H{n}` sem zeros à esquerda)
 - [x] Assinatura de módulos encriptados / DRM — Confirmado (Magic `TWENCBMOD` em `.ontx`)
 - [ ] Existência de módulos com Apócrifos ou versificação diferente (suporte degradado por número de linha planejado)
+
+## 9. Resumo estrutural da especificação oficial (E1b.5)
+- **Tipo do módulo (`config.type`):** `1` = dicionário, `2` = comentário, `3` = livro, `4` = mapa; a extensão do arquivo (`.dct.twm`, `.cmt.twm`, `.gbk.twm`, `.dev.twm`) atua apenas como reserva quando `config.type` está ausente.
+- **Resolução de `content_type`:** (1) coluna `content_type` da entrada (`topics` ou `bible_refs`), quando não vazia; (2) `config.content.type`; (3) padrão conforme `config.user`: `"rvf"` se `user=1`, `"rtf"` caso contrário.
+- **Compressão (`config.compressed=1`):** blobs em `content.data` podem estar comprimidos com zlib (`0x78 …`) e devem ser descomprimidos antes da decodificação.
+- **Tópicos `"meta"` (atalhos):** texto `chave=valor` iniciado por `meta=_twmgc_`, com `type=link`, `id=<topic_id>` e `anchor` opcional; resolve o alvo em cadeia (limite de 5 saltos, sem laços) na leitura e não duplica o corpo no índice.
+- **Tópicos ocultos (`topics_flags.hidden=1`):** omitidos das listas de busca e do índice, permanecendo acessíveis apenas por link ou busca direta pelo identificador.
+- **Recursos fora do escopo atual:** módulos híbridos (`rel_refs` ligando livro a versículos), devocionais (tabela `devotion` por dia/mês), mapas (`type=4`) e criação de módulos.

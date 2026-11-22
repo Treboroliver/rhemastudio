@@ -10,6 +10,7 @@ Marque `[x]` ao concluir. Cada milestone só termina quando **todos** os critér
 - [x] E1b.2 Busca léxica no app (`Ctrl+K`, aba Léxico e índices em segundo plano); ver [09-indice-lexical.md](09-indice-lexical.md).
 - [x] E1b.3 Abertura por `topic_id`, títulos limpos e seleção de pastas tolerante; ver [09-indice-lexical.md](09-indice-lexical.md).
 - [x] E1b.4 Abertura dos dicionários comuns, lemas/refs em genéricos (`v3`) e `Outros dicionários (N)` (`lex_related`); ver [09-indice-lexical.md](09-indice-lexical.md).
+- [x] E1b.5 Links inline (`\fldrslt`), zlib (`compressed=1`), classificação `config.type`, `meta`, `hidden=1` e erros de comentário; ver [09-indice-lexical.md](09-indice-lexical.md).
 
 ---
 

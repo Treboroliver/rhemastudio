@@ -69,7 +69,7 @@ pub struct Library {
 
 /// Versão do formato e das regras de metadados gravadas no catalog.json.
 /// Qualquer alteração em como títulos ou metadados são calculados exige incrementar este valor.
-pub const CATALOG_VERSION: u32 = 5;
+pub const CATALOG_VERSION: u32 = 6;
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 struct FolderCatalog {
@@ -758,20 +758,16 @@ fn module_kind(path: &Path, config_type: Option<&str>) -> Result<ModuleKind, Str
         Some("1") => Some(ModuleKind::Dictionary),
         Some("2") => Some(ModuleKind::Commentary),
         Some("3") => Some(ModuleKind::Book),
-        Some("") => None,
+        Some("4") if extension_kind == Some(ModuleKind::Devotional) => Some(ModuleKind::Devotional),
+        Some("4") => Some(ModuleKind::Unknown),
+        Some("") | None => None,
         Some(_) if extension_kind.is_some() => None,
         Some(_) => Some(ModuleKind::Unknown),
-        None => None,
     };
-    if let (Some(extension_kind), Some(config_kind)) = (extension_kind, config_kind)
-        && extension_kind != config_kind
+    if extension_kind == Some(ModuleKind::Dictionary)
+        && matches!(config_kind, Some(ModuleKind::Commentary | ModuleKind::Book))
     {
-        if extension_kind == ModuleKind::Dictionary
-            && matches!(config_kind, ModuleKind::Commentary | ModuleKind::Book)
-        {
-            return Ok(ModuleKind::Dictionary);
-        }
-        return Err("Extensão e config.type indicam tipos diferentes".to_string());
+        return Ok(ModuleKind::Dictionary);
     }
     Ok(config_kind
         .or(extension_kind)
@@ -1531,5 +1527,25 @@ mod tests {
             .count();
         eprintln!("Outros módulos classificados: {other_count}");
         assert_eq!(warm.cache_hits, warm.modules.len());
+    }
+
+    #[test]
+    fn module_kind_prefers_config_type_with_extension_fallback() {
+        assert_eq!(
+            module_kind(Path::new("wiersbe.twm"), Some("2")),
+            Ok(ModuleKind::Commentary)
+        );
+        assert_eq!(
+            module_kind(Path::new("trocado.cmt.twm"), Some("1")),
+            Ok(ModuleKind::Dictionary)
+        );
+        assert_eq!(
+            module_kind(Path::new("mapa.twm"), Some("4")),
+            Ok(ModuleKind::Unknown)
+        );
+        assert_eq!(
+            module_kind(Path::new("fallback.cmt.twm"), None),
+            Ok(ModuleKind::Commentary)
+        );
     }
 }

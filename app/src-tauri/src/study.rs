@@ -198,6 +198,13 @@ fn entry_error(error: ModuleError) -> ApiError {
             "module_protected",
             "Módulo protegido: não é lido pelo RhemaStudio.",
         ),
+        ModuleError::Corrupted(msg) if msg.contains("meta_cycle") => {
+            ApiError::new("meta_cycle", "Ciclo detectado ao seguir atalho de verbete.")
+        }
+        ModuleError::Corrupted(msg) if msg.contains("meta_depth") => ApiError::new(
+            "meta_depth",
+            "Limite de saltos excedido ao seguir atalho de verbete.",
+        ),
         ModuleError::Corrupted(msg) if msg.contains("NULL") || msg.contains("ausente") => {
             ApiError::new("entry_empty", "Este verbete está vazio neste módulo.")
         }

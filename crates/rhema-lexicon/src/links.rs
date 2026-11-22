@@ -312,17 +312,30 @@ where
         [],
         |r| r.get(0),
     )?;
+    let has_flags: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='topics_flags')",
+        [],
+        |r| r.get(0),
+    )?;
     let orig = if has_original {
         "t.strong_orig_word"
     } else {
         "NULL"
     };
+    let default_kind = "COALESCE(NULLIF(trim((SELECT value FROM config WHERE lower(trim(name))='content.type' LIMIT 1)),''), CASE WHEN trim((SELECT value FROM config WHERE lower(trim(name))='user' LIMIT 1))='1' THEN 'rvf' ELSE 'rtf' END)";
     let kind = if has_type {
-        "COALESCE(t.content_type,(SELECT value FROM config WHERE lower(trim(name))='content.type' LIMIT 1))"
+        format!("COALESCE(NULLIF(trim(t.content_type),''), {default_kind})")
     } else {
-        "(SELECT value FROM config WHERE lower(trim(name))='content.type' LIMIT 1)"
+        default_kind.to_string()
     };
-    let sql = format!("SELECT t.id,t.subject,{orig},{kind},CAST(c.data AS BLOB) FROM topics t LEFT JOIN content c ON c.topic_id=t.id ORDER BY t.id");
+    let hidden_filter = if has_flags {
+        " WHERE NOT EXISTS (SELECT 1 FROM topics_flags tf WHERE tf.id = t.id AND tf.hidden = 1)"
+    } else {
+        ""
+    };
+    let sql = format!(
+        "SELECT t.id,t.subject,{orig},{kind},CAST(c.data AS BLOB) FROM topics t LEFT JOIN content c ON c.topic_id=t.id{hidden_filter} ORDER BY t.id"
+    );
     let mut stmt = db.prepare(&sql)?;
     let mut rows = stmt.query([])?;
     let mut count = 0;
@@ -340,6 +353,9 @@ where
 }
 
 pub(crate) fn decoded(row: &Row) -> Result<Option<String>, ModuleError> {
+    if row.kind.trim().eq_ignore_ascii_case("meta") {
+        return Ok(Some(String::new()));
+    }
     row.bytes
         .as_ref()
         .map(|bytes| {

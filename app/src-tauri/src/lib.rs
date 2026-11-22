@@ -158,6 +158,26 @@ fn load_settings(path: &Path) -> Result<AppSettings, CommandError> {
     }
 }
 
+fn append_lex_error_log(
+    settings_path: &Path,
+    scope: &str,
+    module_title: &str,
+    code: &str,
+    message: &str,
+) {
+    let Some(dir) = settings_path.parent() else {
+        return;
+    };
+    let path = dir.join("lex-errors.log");
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{ts}\t{scope}\t{module_title}\t{code}\t{message}");
+    }
+}
+
 fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let parent = path.parent().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "caminho sem pasta")
@@ -620,7 +640,8 @@ async fn get_commentary_index(
     let (catalog, settings) = study_snapshot(&state)?;
     let active = study::effective_commentaries(settings.commentary_module_ids.as_deref(), &catalog);
     let cache = Arc::clone(&state.study);
-    tauri::async_runtime::spawn_blocking(move || {
+    let settings_path = state.settings_path.clone();
+    let dto = tauri::async_runtime::spawn_blocking(move || {
         study::commentary_index(
             &cache,
             &active,
@@ -631,7 +652,19 @@ async fn get_commentary_index(
         )
     })
     .await
-    .map_err(|error| ApiError::internal(error.to_string()))?
+    .map_err(|error| ApiError::internal(error.to_string()))??;
+    for module in &dto.modules {
+        if let Some(err) = &module.error {
+            append_lex_error_log(
+                &settings_path,
+                "commentary_index",
+                &module.module_title,
+                err.code,
+                &err.message,
+            );
+        }
+    }
+    Ok(dto)
 }
 
 #[tauri::command]
@@ -646,12 +679,24 @@ async fn get_commentary_entry(
         .into_iter()
         .find(|module| module.id == module_id)
         .ok_or_else(|| ApiError::new("module_not_found", "Módulo não encontrado na biblioteca."))?;
+    let module_title = module.title.clone();
+    let settings_path = state.settings_path.clone();
     let cache = Arc::clone(&state.study);
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         study::commentary_entry(&cache, &module, topic_id, offset)
     })
     .await
-    .map_err(|error| ApiError::internal(error.to_string()))?
+    .map_err(|error| ApiError::internal(error.to_string()))?;
+    if let Err(ref err) = result {
+        append_lex_error_log(
+            &settings_path,
+            "commentary_entry",
+            &module_title,
+            err.code,
+            &err.message,
+        );
+    }
+    result
 }
 
 #[tauri::command]
