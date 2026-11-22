@@ -1313,11 +1313,29 @@ mod tests {
             return;
         };
         let folder = PathBuf::from(folder);
-        let ara_path = find_module(&folder, "ara+.ont").expect("ARA+ ausente");
-        let kjv_path = find_module(&folder, "kjv.ont").expect("KJV ausente");
+        let Some(ara_path) = find_module(&folder, "ara+.ont") else {
+            eprintln!(
+                "real_parallel_bible_chapter_counts_and_release_timing: ignorado (ara+.ont ausente)"
+            );
+            return;
+        };
+        let Some((second_id, second_path)) = find_module(&folder, "kjfiel+.ont")
+            .map(|p| ("kjfiel+", p))
+            .or_else(|| find_module(&folder, "kjv.ont").map(|p| ("kjv", p)))
+        else {
+            eprintln!(
+                "real_parallel_bible_chapter_counts_and_release_timing: ignorado (kjfiel+.ont e kjv.ont ausentes)"
+            );
+            return;
+        };
         let modules = [
             module("ara+", &ara_path, ModuleKind::Bible, ModuleState::Ready),
-            module("kjv", &kjv_path, ModuleKind::Bible, ModuleState::Ready),
+            module(
+                second_id,
+                &second_path,
+                ModuleKind::Bible,
+                ModuleState::Ready,
+            ),
         ];
         let cache = ReaderCache::new(READER_CACHE_CAPACITY);
         let mut elapsed_total = 0.0f64;
