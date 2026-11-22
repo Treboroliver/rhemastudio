@@ -757,7 +757,7 @@ pub fn decode_twm_content_checked(
             nodes: crate::html::convert_html(input),
             degraded: false,
         }),
-        "" | "txt" | "text" => Ok(DecodedContent {
+        "" | "unknown" | "txt" | "text" => Ok(DecodedContent {
             nodes: crate::html::convert_plain_bytes(input),
             degraded: false,
         }),
@@ -828,7 +828,7 @@ pub fn decode_twm_content_page(
             max_paragraphs,
             max_chars,
         )),
-        "" | "txt" | "text" => Ok(page_nodes(
+        "" | "unknown" | "txt" | "text" => Ok(page_nodes(
             crate::html::convert_plain_bytes(input),
             offset,
             max_paragraphs,

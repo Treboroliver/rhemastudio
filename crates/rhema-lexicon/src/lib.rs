@@ -6,14 +6,15 @@ mod reverse;
 mod translit;
 
 pub use extract::{
-    clean_title, extract_ditat, extract_ditnt, extract_generic, extract_louw_nida, extract_strong,
-    DitatEntry, DitatSubentry, DitntEntry, LouwNidaEntry, StrongEntry,
+    clean_title, extract_ditat, extract_ditnt, extract_explicit_strong_refs, extract_generic,
+    extract_louw_nida, extract_strong, split_mixed_title, DitatEntry, DitatSubentry, DitntEntry,
+    LouwNidaEntry, StrongEntry,
 };
 pub use index::{
     bench_queries, build_index, default_data_dir, default_index_dir, BuildProgress, ChangeKind,
     IndexBuildReport, IndexMetadata, IndexStatus, IndexedModule, LexKind, LexiconIndex, MatchField,
-    ModuleBuildReport, ModuleChange, ModuleHits, SearchFilters, SearchHit, SearchResults,
-    SkippedModule, INDEX_SCHEMA_VERSION,
+    ModuleBuildReport, ModuleChange, ModuleHits, RelatedHit, SearchFilters, SearchHit,
+    SearchResults, SkippedModule, INDEX_SCHEMA_VERSION,
 };
 pub use links::{
     build_links, links_for_ditnt, links_for_strong, BuildReport, LexiconError, Link, LinkKind,

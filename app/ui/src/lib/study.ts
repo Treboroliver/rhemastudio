@@ -107,11 +107,40 @@ export interface LexEntryRequest {
   seq: number
 }
 
+export interface LexRelatedItemDto {
+  module_id: string
+  module_title: string
+  kind: string
+  key: string
+  topic_id: number | null
+  title: string
+  reason: string
+  error: string | null
+}
+
+export interface LexRelatedDto {
+  primary: LexiconEntryDto
+  related: LexRelatedItemDto[]
+}
+
 export const lookupStrong = (strongId: string) =>
   invoke<LexiconEntryDto>('lookup_strong', { strongId })
 
 export const lexEntry = (moduleId: string, key: string, topicId?: number | null) =>
   invoke<LexiconEntryDto>('lex_entry', { moduleId, key, topicId: topicId ?? null })
+
+export const lexRelated = (params: {
+  strongId?: string | null
+  moduleId?: string | null
+  key?: string | null
+  topicId?: number | null
+}) =>
+  invoke<LexRelatedDto>('lex_related', {
+    strongId: params.strongId ?? null,
+    moduleId: params.moduleId ?? null,
+    key: params.key ?? null,
+    topicId: params.topicId ?? null
+  })
 
 export const lexSearch = (query: string, limit?: number) =>
   invoke<LexSearchDto>('lex_search', { query, limit })

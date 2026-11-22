@@ -534,6 +534,33 @@ async fn lex_entry(
 }
 
 #[tauri::command]
+async fn lex_related(
+    strong_id: Option<String>,
+    module_id: Option<String>,
+    key: Option<String>,
+    topic_id: Option<i64>,
+    state: State<'_, AppState>,
+) -> Result<lex::LexRelatedDto, ApiError> {
+    let (catalog, settings) = study_snapshot(&state)?;
+    let lex_state = Arc::clone(&state.lex);
+    let cache = Arc::clone(&state.study);
+    tauri::async_runtime::spawn_blocking(move || {
+        lex::related_for(
+            &lex_state,
+            &cache,
+            &catalog,
+            settings.lexicon_module_ids.as_deref(),
+            strong_id.as_deref(),
+            module_id.as_deref(),
+            key.as_deref(),
+            topic_id,
+        )
+    })
+    .await
+    .map_err(|error| ApiError::internal(error.to_string()))?
+}
+
+#[tauri::command]
 async fn lookup_strong(
     strong_id: String,
     state: State<'_, AppState>,
@@ -726,6 +753,7 @@ pub fn run() {
             lex_index_build,
             lex_search,
             lex_entry,
+            lex_related,
             get_verse_snapshot,
             get_lexicon_snapshot,
             get_commentary_index,

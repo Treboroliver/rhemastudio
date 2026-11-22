@@ -136,6 +136,24 @@ pub struct LexSearchGroupDto {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct LexRelatedItemDto {
+    pub module_id: String,
+    pub module_title: String,
+    pub kind: String,
+    pub key: String,
+    pub topic_id: Option<i64>,
+    pub title: String,
+    pub reason: String,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct LexRelatedDto {
+    pub primary: LexiconEntryDto,
+    pub related: Vec<LexRelatedItemDto>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct LexSearchDto {
     pub query: String,
     pub total: usize,
@@ -584,6 +602,170 @@ pub fn entry(
     study::lookup_entry(cache, module, key, topic_id)
 }
 
+fn plain_from_ui_nodes(nodes: &[crate::reader::UiNode]) -> String {
+    let mut out = String::new();
+    for node in nodes {
+        match node {
+            crate::reader::UiNode::Text { value } => out.push_str(value),
+            crate::reader::UiNode::Italic { children }
+            | crate::reader::UiNode::Bold { children }
+            | crate::reader::UiNode::Underline { children }
+            | crate::reader::UiNode::Strikethrough { children }
+            | crate::reader::UiNode::Caps { children }
+            | crate::reader::UiNode::Superscript { children }
+            | crate::reader::UiNode::Subscript { children }
+            | crate::reader::UiNode::WordsOfJesus { children }
+            | crate::reader::UiNode::OtQuote { children }
+            | crate::reader::UiNode::Note { children }
+            | crate::reader::UiNode::Heading { children, .. }
+            | crate::reader::UiNode::Link { children, .. }
+            | crate::reader::UiNode::VerseLink { children, .. }
+            | crate::reader::UiNode::EntryLink { children, .. }
+            | crate::reader::UiNode::Strong { children, .. } => {
+                out.push_str(&plain_from_ui_nodes(children));
+            }
+            crate::reader::UiNode::Paragraph | crate::reader::UiNode::LineBreak => out.push(' '),
+        }
+    }
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn related_for(
+    lex_state: &LexState,
+    cache: &StudyCache,
+    catalog: &[ModuleInfo],
+    active_lexicon_ids: Option<&[String]>,
+    strong_id: Option<&str>,
+    module_id: Option<&str>,
+    key: Option<&str>,
+    topic_id: Option<i64>,
+) -> Result<LexRelatedDto, ApiError> {
+    let active = study::effective_lexicons(active_lexicon_ids, catalog);
+    let (primary, mut resolved_strong, mut lemma_hint) = if let Some(sid) = strong_id {
+        let dto = study::lookup_strong(cache, &active, sid)?;
+        let strong = dto.key.clone();
+        let orig = dto.original_word.clone();
+        (dto, Some(strong), orig)
+    } else if let (Some(mid), Some(k)) = (module_id, key) {
+        let dto = entry(cache, catalog, mid, k, topic_id)?;
+        let parsed = rhema_lexicon::parse_query(&dto.key)
+            .into_iter()
+            .find_map(|q| match q {
+                rhema_lexicon::Query::Strong(s) => Some(s),
+                _ => None,
+            });
+        let orig = dto.original_word.clone();
+        (dto, parsed, orig)
+    } else {
+        return Err(ApiError::new(
+            "invalid_argument",
+            "Informe strong_id ou (module_id, key).",
+        ));
+    };
+
+    if resolved_strong.is_none() {
+        let (lemmas, _) = rhema_lexicon::split_mixed_title(&primary.title);
+        if lemma_hint.is_none() {
+            lemma_hint = lemmas.first().cloned();
+        }
+        if let (Some(lemma), Ok(idx)) = (lemmas.first(), lex_state.cached_or_open())
+            && let Ok(res) = idx.search(
+                lemma,
+                5,
+                &SearchFilters {
+                    modules: Vec::new(),
+                    kinds: vec![LexKind::Strong],
+                },
+            )
+            && let Some(hit) = res.groups.first().and_then(|g| g.hits.first())
+        {
+            resolved_strong = Some(hit.key.clone());
+        }
+        if resolved_strong.is_none() {
+            let plain = plain_from_ui_nodes(&primary.nodes);
+            resolved_strong = rhema_lexicon::extract_explicit_strong_refs(&plain)
+                .into_iter()
+                .find(|r| r.starts_with('G') || r.starts_with('H'));
+        }
+    }
+
+    let mut related = Vec::new();
+    if let (Some(strong), Ok(idx)) = (resolved_strong, lex_state.cached_or_open())
+        && let Ok(hits) = idx.related_for_strong(&strong, lemma_hint.as_deref(), 50)
+    {
+        let active_by_file: HashMap<String, &ModuleInfo> = active
+            .iter()
+            .filter_map(|m| {
+                m.path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| (n.to_string(), m))
+            })
+            .collect();
+        let active_by_id: HashMap<&str, &ModuleInfo> =
+            active.iter().map(|m| (m.id.as_str(), m)).collect();
+
+        for hit in hits {
+            let Some(module) = active_by_id
+                .get(hit.module_id.as_str())
+                .or_else(|| active_by_file.get(&hit.module_id))
+                .copied()
+            else {
+                continue;
+            };
+            if module.id == primary.module_id
+                && (hit.key == primary.key || hit.key == primary.title)
+            {
+                continue;
+            }
+            related.push(LexRelatedItemDto {
+                module_id: module.id.clone(),
+                module_title: module.title.clone(),
+                kind: hit.kind.as_str().into(),
+                title: hit.key.clone(),
+                key: hit.key,
+                topic_id: hit.topic_id,
+                reason: hit.reason,
+                error: None,
+            });
+            if related.len() >= 50 {
+                break;
+            }
+        }
+    }
+
+    if let Some(ids) = active_lexicon_ids {
+        for id in ids {
+            if related.len() >= 50 {
+                break;
+            }
+            if let Some(m) = catalog.iter().find(|m| {
+                m.id == *id && m.kind == ModuleKind::Dictionary && m.state != ModuleState::Ready
+            }) {
+                let msg = match &m.state {
+                    ModuleState::Protected => "Módulo protegido".to_string(),
+                    ModuleState::UnsupportedFormat { message }
+                    | ModuleState::Corrupted { message } => message.clone(),
+                    ModuleState::Ready => continue,
+                };
+                related.push(LexRelatedItemDto {
+                    module_id: m.id.clone(),
+                    module_title: m.title.clone(),
+                    kind: "dictionary".into(),
+                    key: primary.key.clone(),
+                    topic_id: None,
+                    title: primary.title.clone(),
+                    reason: "indisponível".into(),
+                    error: Some(msg),
+                });
+            }
+        }
+    }
+
+    Ok(LexRelatedDto { primary, related })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -669,6 +851,63 @@ mod tests {
                 .code,
             "entry_not_found"
         );
+    }
+
+    #[test]
+    fn related_returns_primary_and_orders_related_entries_with_reasons() {
+        let dir = tempdir().unwrap();
+        let mods = dir.path().join("mods");
+        fs::create_dir(&mods).unwrap();
+        let p_strong = mods.join("strong_amg.dct.twm");
+        let p_strong2 = mods.join("strong_amg_2.dct.twm");
+        let p_prot = mods.join("protegido.dct.twm");
+        generate_synthetic_study_dictionary_twm(&p_strong).unwrap();
+        generate_synthetic_study_dictionary_twm(&p_strong2).unwrap();
+        generate_synthetic_protected_twm(&p_prot, "do.encrypt").unwrap();
+
+        let catalog = vec![
+            info_for(
+                "id-strong",
+                p_strong,
+                "Strong Sintetico",
+                ModuleState::Ready,
+            ),
+            info_for(
+                "id-strong2",
+                p_strong2,
+                "Strong Secundario",
+                ModuleState::Ready,
+            ),
+            info_for("id-prot", p_prot, "Protegido", ModuleState::Protected),
+        ];
+
+        let state = LexState::new(&dir.path().join("appdata"));
+        build_all_indexes(&state, std::slice::from_ref(&mods), &mut |_| {}).unwrap();
+        let cache = StudyCache::new(4);
+
+        let active_ids = vec![
+            "id-strong".to_string(),
+            "id-strong2".to_string(),
+            "id-prot".to_string(),
+        ];
+        let dto = related_for(
+            &state,
+            &cache,
+            &catalog,
+            Some(&active_ids),
+            Some("G25"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(dto.primary.module_id, "id-strong");
+        assert_eq!(dto.related.len(), 2);
+        assert_eq!(dto.related[0].module_id, "id-strong2");
+        assert_eq!(dto.related[0].reason, "chave Strong");
+        assert!(dto.related[0].error.is_none());
+        assert_eq!(dto.related[1].module_id, "id-prot");
+        assert!(dto.related[1].error.is_some());
     }
 
     #[test]

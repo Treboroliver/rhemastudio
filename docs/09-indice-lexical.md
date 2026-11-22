@@ -79,6 +79,8 @@ As taxas não demonstram equivalência semântica; as ligações preservam prove
 - **Interface (`Ctrl+K` e aba Léxico):** debounce de 120 ms, prioridade para referências bíblicas, prefixo `l `, sugestões G/H lado a lado com Dice, barra de status (`Índice pronto`/`Construindo %`/`Reconstrução necessária`) e botão `Reconstruir índice`.
 
 ## E1b.3 — Abertura por topic_id e títulos limpos
+- `INDEX_SCHEMA_VERSION = 2` guarda `topic_id` e aplica `clean_title`; `lookup_by_id` abre o verbete sem `key.trim()`, e `library_scan` tolera pastas ausentes (`library:warnings` + `Remover`).
 
-- **Correção:** `INDEX_SCHEMA_VERSION = 2` guarda `topic_id` e aplica `clean_title` (`[[@Headword:X]]`, tags, entidades) na exibição e em `extract_generic`; `lookup_by_id` abre o verbete sem `key.trim()`, e `content.data IS NULL` vira `entry_empty` com mensagens específicas (sem `Tentar novamente` para erros definitivos).
-- **Pastas e verificação:** `library_scan` tolera pastas ausentes (`library:warnings`) e o assistente tem `Remover`. Por `topic_id`, 10 módulos chegam a 200/200 aberturas (`EnciclopédiaTematica` 195/200 e `VINE` 119/200 por `entry_empty`).
+## E1b.4 — Abertura universal, lemas comuns e relacionados
+- **Correções:** `DictionarySource::open` exige só `(id, subject)` em `topics` (antes exigia `strong_orig_word`/`content_type`), `rhema-library`/`twm.rs` aceitam `.dct.twm` com `type=2/3` (`topics` sem `bible_refs`), e `unknown` (sem `content.type`) lê como texto simples. Nos testes do app, os 10 módulos antes com `0` aberturas passaram a `100%` (`VINE` 1 `ok` + 1 `entry_empty`).
+- **Índice (`v3`) e `lex_related`:** genéricos indexam títulos gregos/hebraicos/mistos em `lemma`/`lemma_norm`/`translit_greek` e citações explícitas de Strong em `refs`. `lex_related` + `"Outros dicionários (N)"` na aba Léxico (`G25`: 6/3 mód., `G3056`: 28/4 mód., `H430`: 2/2 mód.). Construção 53.238 ms, 19.656.949 bytes; 200 consultas p50 1,91 ms, p95 11,38 ms.

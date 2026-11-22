@@ -76,7 +76,7 @@ impl TwmModule {
         drop(rows);
         drop(statement);
 
-        let kind = module_kind(&config, path)?;
+        let kind = module_kind(&config, path, &connection)?;
         Ok(Self {
             connection,
             config,
@@ -117,7 +117,7 @@ impl TwmModule {
         let content_type = self.content_type(row_type);
         if !matches!(
             content_type.as_str(),
-            "rtf" | "rvf" | "html" | "" | "txt" | "text"
+            "rtf" | "rvf" | "html" | "" | "unknown" | "txt" | "text"
         ) {
             return Err(ModuleError::UnsupportedContent(content_type));
         }
@@ -136,7 +136,7 @@ impl TwmModule {
         let content_type = self.content_type(row_type);
         if !matches!(
             content_type.as_str(),
-            "rtf" | "rvf" | "html" | "" | "txt" | "text"
+            "rtf" | "rvf" | "html" | "" | "unknown" | "txt" | "text"
         ) {
             return Err(ModuleError::UnsupportedContent(content_type));
         }
@@ -430,6 +430,8 @@ struct DictionaryRef {
 
 pub struct DictionarySource {
     module: TwmModule,
+    has_strong_orig_word: bool,
+    has_content_type: bool,
 }
 
 impl DictionarySource {
@@ -440,24 +442,48 @@ impl DictionarySource {
                 "O módulo não é um dicionário".to_string(),
             ));
         }
-        module.validate_table(
-            "topics",
-            &["id", "subject", "strong_orig_word", "content_type"],
-        )?;
+        module.validate_table("topics", &["id", "subject"])?;
         module.validate_table("content", &["topic_id", "data"])?;
-        Ok(Self { module })
+        let has_col = |name: &str| -> Result<bool, ModuleError> {
+            module
+                .connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM pragma_table_info('topics') WHERE name=?1)",
+                    [name],
+                    |row| row.get(0),
+                )
+                .map_err(corrupted)
+        };
+        let has_strong_orig_word = has_col("strong_orig_word")?;
+        let has_content_type = has_col("content_type")?;
+        Ok(Self {
+            module,
+            has_strong_orig_word,
+            has_content_type,
+        })
+    }
+
+    fn topic_columns(&self, prefix: &str) -> String {
+        let orig = if self.has_strong_orig_word {
+            format!("{prefix}strong_orig_word")
+        } else {
+            "NULL".to_string()
+        };
+        let ct = if self.has_content_type {
+            format!("{prefix}content_type")
+        } else {
+            "NULL".to_string()
+        };
+        format!("{prefix}id, {prefix}subject, {orig}, {ct}")
     }
 
     pub fn lookup(&self, key: &str) -> Result<Option<DictionaryEntry>, ModuleError> {
+        let cols = self.topic_columns("");
+        let sql = format!("SELECT {cols} FROM topics WHERE subject = ?1 COLLATE NOCASE LIMIT 1");
         let query = self
             .module
             .connection
-            .query_row(
-                "SELECT id, subject, strong_orig_word, content_type FROM topics \
-                 WHERE subject = ?1 COLLATE NOCASE LIMIT 1",
-                [key],
-                read_dictionary_ref,
-            )
+            .query_row(&sql, [key], read_dictionary_ref)
             .optional()
             .map_err(corrupted)?;
         query.map(|entry| self.load_entry(entry)).transpose()
@@ -465,15 +491,12 @@ impl DictionarySource {
 
     /// Busca uma entrada de dicionário diretamente pelo `topic_id` estável.
     pub fn lookup_by_id(&self, topic_id: i64) -> Result<Option<DictionaryEntry>, ModuleError> {
+        let cols = self.topic_columns("");
+        let sql = format!("SELECT {cols} FROM topics WHERE id = ?1 LIMIT 1");
         let query = self
             .module
             .connection
-            .query_row(
-                "SELECT id, subject, strong_orig_word, content_type FROM topics \
-                 WHERE id = ?1 LIMIT 1",
-                [topic_id],
-                read_dictionary_ref,
-            )
+            .query_row(&sql, [topic_id], read_dictionary_ref)
             .optional()
             .map_err(corrupted)?;
         query.map(|entry| self.load_entry(entry)).transpose()
@@ -489,15 +512,13 @@ impl DictionarySource {
         }
         let escaped = escape_like(prefix);
         let pattern = format!("{escaped}%");
-        let mut statement = self
-            .module
-            .connection
-            .prepare(
-                "SELECT id, subject, strong_orig_word, content_type FROM topics \
-                 WHERE subject LIKE ?1 ESCAPE '\\' COLLATE NOCASE \
-                 ORDER BY subject COLLATE NOCASE LIMIT ?2",
-            )
-            .map_err(corrupted)?;
+        let cols = self.topic_columns("");
+        let sql = format!(
+            "SELECT {cols} FROM topics \
+             WHERE subject LIKE ?1 ESCAPE '\\' COLLATE NOCASE \
+             ORDER BY subject COLLATE NOCASE LIMIT ?2"
+        );
+        let mut statement = self.module.connection.prepare(&sql).map_err(corrupted)?;
         let records = statement
             .query_map((&pattern, sql_limit(limit)), read_dictionary_ref)
             .map_err(corrupted)?
@@ -524,17 +545,15 @@ impl DictionarySource {
         }
         self.module
             .validate_table("topics_wordindex", &["id", "word", "priority"])?;
-        let mut statement = self
-            .module
-            .connection
-            .prepare(
-                "SELECT t.id, t.subject, t.strong_orig_word, t.content_type \
-                 FROM topics_wordindex w JOIN topics t ON t.id = w.id \
-                 WHERE w.word = ?1 COLLATE NOCASE \
-                 GROUP BY t.id, t.subject, t.strong_orig_word, t.content_type \
-                 ORDER BY MAX(w.priority) DESC, t.subject COLLATE NOCASE LIMIT ?2",
-            )
-            .map_err(corrupted)?;
+        let cols = self.topic_columns("t.");
+        let sql = format!(
+            "SELECT {cols} \
+             FROM topics_wordindex w JOIN topics t ON t.id = w.id \
+             WHERE w.word = ?1 COLLATE NOCASE \
+             GROUP BY t.id, t.subject \
+             ORDER BY MAX(w.priority) DESC, t.subject COLLATE NOCASE LIMIT ?2"
+        );
+        let mut statement = self.module.connection.prepare(&sql).map_err(corrupted)?;
         let records = statement
             .query_map((word, sql_limit(limit)), read_dictionary_ref)
             .map_err(corrupted)?
@@ -597,7 +616,29 @@ pub fn normalize_strong_key(text: &str) -> Option<(StrongLang, u32)> {
     significant.parse::<u32>().ok().map(|number| (lang, number))
 }
 
-fn module_kind(config: &HashMap<String, String>, path: &Path) -> Result<TwmKind, ModuleError> {
+fn module_kind(
+    config: &HashMap<String, String>,
+    path: &Path,
+    connection: &Connection,
+) -> Result<TwmKind, ModuleError> {
+    let filename = path.to_string_lossy().to_ascii_lowercase();
+    let has_topics: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='topics')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+    let has_bible_refs: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='bible_refs')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+    if filename.ends_with(".dct.twm") && has_topics && !has_bible_refs {
+        return Ok(TwmKind::Dictionary);
+    }
     let declared = config
         .get("type")
         .map(|value| value.trim().to_ascii_lowercase());

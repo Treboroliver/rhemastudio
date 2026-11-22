@@ -261,6 +261,9 @@ button:focus-visible, select:focus-visible, input:focus-visible {
 .folder-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .folder-item .path-row { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .warning-banner { margin: 8px 0; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--accent); background: var(--card); font-size: 13px; }
+.lex-related-bar { position: relative; margin-bottom: 8px; }
+.lex-related-menu { list-style: none; margin: 4px 0 0; padding: 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); max-height: 240px; overflow-y: auto; }
+.lex-related-reason { font-size: 11px; color: var(--muted); }
 .command-detail { color: var(--muted); font-size: 12px; }
 .command-hint { margin: 10px 2px 0; color: var(--muted); font-size: 12px; }
 

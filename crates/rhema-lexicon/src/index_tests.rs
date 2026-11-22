@@ -573,11 +573,59 @@ fn cleans_titles_and_preserves_distinct_topic_ids_for_duplicates() -> Result<(),
     assert_eq!(fe.groups[0].hits[0].topic_id, Some(20));
 
     let dup = index.search("duplicado", 10, &none)?;
-    let ids: Vec<_> = dup.groups[0]
+    let mut ids: Vec<_> = dup.groups[0]
         .hits
         .iter()
         .filter_map(|h| h.topic_id)
         .collect();
+    ids.sort();
     assert_eq!(ids, vec![30, 31]);
+    Ok(())
+}
+
+#[test]
+fn indexes_generic_greek_hebrew_mixed_titles_and_explicit_refs() -> Result<(), LexiconError> {
+    let dir = tempfile::tempdir()?;
+    let modules = dir.path().join("modulos");
+    fs::create_dir(&modules)?;
+    let path = modules.join("comum.dct.twm");
+    fixture(
+        &path,
+        &[
+            (
+                "ἀγαπάω",
+                "",
+                "texto sobre G25 e Strong's #25 e numero solto 999",
+            ),
+            ("אָהַב", "", "texto sobre H157 e Strong 157"),
+            ("λόγος (palavra)", "", "citando {G3056}"),
+            ("Pecado", "", "numero solto 3056 sem marcador"),
+        ],
+        false,
+    )?;
+
+    let index_dir = dir.path().join("indice");
+    build_index(&index_dir, std::slice::from_ref(&modules), &mut |_| {})?;
+    let index = LexiconIndex::open(&index_dir)?;
+    let none = SearchFilters::default();
+
+    assert_eq!(index.search("ἀγαπάω", 10, &none)?.total, 1);
+    assert_eq!(index.search("agapao", 10, &none)?.total, 1);
+    assert_eq!(index.search("אהב", 10, &none)?.total, 1);
+    assert_eq!(
+        index.search("λογοσ", 10, &none)?.groups[0].hits[0].key,
+        "λόγος (palavra)"
+    );
+    assert_eq!(
+        index.search("palavra", 10, &none)?.groups[0].hits[0].key,
+        "λόγος (palavra)"
+    );
+    assert_eq!(index.search("G25", 10, &none)?.total, 1);
+    assert_eq!(index.search("H157", 10, &none)?.total, 1);
+    assert_eq!(
+        index.search("G3056", 10, &none)?.groups[0].hits[0].key,
+        "λόγος (palavra)"
+    );
+    assert_eq!(index.search("3056", 10, &none)?.total, 0);
     Ok(())
 }

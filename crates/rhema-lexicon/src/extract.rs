@@ -403,6 +403,67 @@ pub fn extract_generic(title: &str) -> String {
     fold_latin(&clean_title(title))
 }
 
+/// Extrai citações explícitas de Strong (`G3056`, `H430`, `{G3056}`, `Strong's #3056`, `Strong 3056`).
+/// Números soltos sem prefixo `G`/`H` nem marcador `Strong` são ignorados.
+pub fn extract_explicit_strong_refs(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    if let Some(gh) = regex(r"(?i)\b([GH])\s*(\d+)\b") {
+        for cap in gh.captures_iter(text) {
+            if cap[2].len() <= 5 {
+                if let Ok(n) = cap[2].parse::<u32>() {
+                    if n > 0 {
+                        let prefix = cap[1].to_ascii_uppercase();
+                        let code = format!("{prefix}{n}");
+                        if seen.insert(code.clone()) {
+                            out.push(code);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Ok(strong_bare) = Regex::new(r"(?i)\bstrong(?:'s|s)?\s*#?\s*(\d{1,5})\b") {
+        for cap in strong_bare.captures_iter(text) {
+            if let Ok(n) = cap[1].parse::<u32>() {
+                if n > 0 {
+                    let code = format!("S{n}");
+                    if seen.insert(code.clone()) {
+                        out.push(code);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Separa um título de dicionário comum em `(lemas_gregos_ou_hebraicos, parte_latina)`.
+pub fn split_mixed_title(title: &str) -> (Vec<String>, String) {
+    let cleaned = clean_title(title);
+    let mut lemmas = words(&cleaned, true);
+    lemmas.extend(words(&cleaned, false));
+    let mut latin = String::with_capacity(cleaned.len());
+    for c in cleaned.chars() {
+        let v = c as u32;
+        let is_gk_hb = matches!(v, 0x0370..=0x03ff | 0x1f00..=0x1fff | 0x0590..=0x05ff)
+            || unicode_normalization::char::is_combining_mark(c);
+        if is_gk_hb {
+            latin.push(' ');
+        } else {
+            latin.push(c);
+        }
+    }
+    let latin_norm = fold_latin(
+        &latin
+            .split(|c: char| !c.is_alphanumeric() && c != '\'' && c != '-')
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
+    (lemmas, latin_norm)
+}
+
 pub(crate) fn normalized_greek(lemma: &str) -> String {
     fold_greek(lemma).trim().to_string()
 }
@@ -484,6 +545,16 @@ mod tests {
         assert_eq!(clean_title("[[@Headword:CREDO]] CREDO"), "CREDO");
         assert_eq!(clean_title("<b>F&eacute;</b> &amp; &#233;"), "Fé & é");
         assert_eq!(extract_generic("[[@Headword:AMOR]] AMOR "), "amor");
+        assert_eq!(
+            extract_explicit_strong_refs(
+                "Veja G3056, {H430}, Strong's #123, Strong 45 e numero 999."
+            ),
+            vec!["G3056", "H430", "S123", "S45"]
+        );
+        assert_eq!(
+            split_mixed_title("ἀγαπάω (amar)"),
+            (vec!["ἀγαπάω".to_string()], "amar".to_string())
+        );
         assert!(extract_strong("", "", "").is_none());
         assert!(extract_ditat("?", "").is_none());
     }

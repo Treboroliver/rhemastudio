@@ -14,6 +14,7 @@ Referências: [plano](06-plano-exegese.md) e [inventário E0](07-inventario-exeg
 - E1b.1: concluído — índice reverso palavra → Strong e integração na busca; ver [09-indice-lexical.md](09-indice-lexical.md).
 - E1b.2: concluído — busca léxica no app (`Ctrl+K`, aba Léxico e índices em segundo plano); ver [09-indice-lexical.md](09-indice-lexical.md).
 - E1b.3: concluído — abertura por `topic_id`, títulos limpos (`clean_title`), mensagens específicas e remoção de pastas; ver [09-indice-lexical.md](09-indice-lexical.md).
+- E1b.4: concluído — correção de abertura dos dicionários comuns (`twm.rs`/`rhema-library`), lemas/refs em genéricos (`v3`) e menu `Outros dicionários (N)` (`lex_related`); ver [09-indice-lexical.md](09-indice-lexical.md).
 - E2a: pendente — painel de palavra.
 - E2b: pendente — interlinear.
 - E3: pendente — textos originais e morfologia.

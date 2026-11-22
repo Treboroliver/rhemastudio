@@ -23,13 +23,13 @@ use walkdir::WalkDir;
 use crate::links::{classify, decoded, entries, read_db, Kind, Row};
 use crate::translit::{translit_greek, translit_norm};
 use crate::{
-    clean_title, detect_script, extract_ditat, extract_ditnt, extract_generic, extract_louw_nida,
-    extract_strong, fold_greek, fold_hebrew, fold_latin, links_for_strong, parse_query,
-    LexiconError, Query, Script,
+    clean_title, detect_script, extract_ditat, extract_ditnt, extract_explicit_strong_refs,
+    extract_generic, extract_louw_nida, extract_strong, fold_greek, fold_hebrew, fold_latin,
+    links_for_strong, parse_query, split_mixed_title, LexiconError, Query, Script,
 };
 
 /// Versão do esquema do índice; mudança exige reconstrução.
-pub const INDEX_SCHEMA_VERSION: u32 = 2;
+pub const INDEX_SCHEMA_VERSION: u32 = 3;
 const METADATA_FILE: &str = "rhema-index.json";
 const POINTER_FILE: &str = "CURRENT";
 const GENERATION_PREFIX: &str = "gen-";
@@ -256,6 +256,15 @@ pub struct ModuleHits {
     pub module_id: String,
     pub kind: LexKind,
     pub hits: Vec<SearchHit>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RelatedHit {
+    pub module_id: String,
+    pub kind: LexKind,
+    pub key: String,
+    pub topic_id: Option<i64>,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -601,10 +610,42 @@ fn entry_document(f: &Fields, module: &Found, row: &Row, text: &str) -> TantivyD
             add_refs(&mut doc, f, &entry.initial_strong);
         }
         LexKind::Generic => {
-            let title = extract_generic(&row.key);
-            if !title.is_empty() {
-                doc.add_text(f.key_norm, title);
+            let cleaned = clean_title(&row.key);
+            match detect_script(&cleaned) {
+                Script::Greek => {
+                    let (lemmas, _) = split_mixed_title(&cleaned);
+                    for lemma in &lemmas {
+                        add_lemma(&mut doc, f, lemma);
+                        add_translit(&mut doc, f, &translit_greek(lemma));
+                    }
+                }
+                Script::Hebrew => {
+                    let (lemmas, _) = split_mixed_title(&cleaned);
+                    for lemma in &lemmas {
+                        add_lemma(&mut doc, f, lemma);
+                    }
+                }
+                Script::Mixed => {
+                    let (lemmas, latin) = split_mixed_title(&cleaned);
+                    for lemma in &lemmas {
+                        add_lemma(&mut doc, f, lemma);
+                        if detect_script(lemma) == Script::Greek {
+                            add_translit(&mut doc, f, &translit_greek(lemma));
+                        }
+                    }
+                    if !latin.is_empty() {
+                        doc.add_text(f.key_norm, latin);
+                    }
+                }
+                _ => {
+                    let title = extract_generic(&row.key);
+                    if !title.is_empty() {
+                        doc.add_text(f.key_norm, title);
+                    }
+                }
             }
+            let refs = extract_explicit_strong_refs(text);
+            add_refs(&mut doc, f, &refs);
         }
     }
     if !text.is_empty() {
@@ -1025,7 +1066,11 @@ impl LexiconIndex {
                     MatchField::Key,
                     all(vec![kind(LexKind::Strong), term(f.key_norm, number)]),
                 );
-                push(MatchField::Refs, term(f.refs, number));
+                let bare = format!("S{}", &number[1..]);
+                push(
+                    MatchField::Refs,
+                    any(vec![term(f.refs, number), term(f.refs, &bare)]),
+                );
             }
             Query::LouwNida(value) => {
                 push(
@@ -1424,6 +1469,130 @@ impl LexiconIndex {
             kind: hits[0].kind,
             hits,
         })
+    }
+
+    /// Lista entradas relacionadas a um número Strong em todos os módulos indexados,
+    /// ordenadas por força do motivo: chave Strong > ligação Louw-Nida > mesmo lema > citado no verbete.
+    pub fn related_for_strong(
+        &self,
+        strong: &str,
+        lemma_hint: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<RelatedHit>, LexiconError> {
+        let Some(Query::Strong(strong)) = parse_query(strong).into_iter().next() else {
+            return Ok(Vec::new());
+        };
+        let limit = limit.clamp(1, 50);
+        let searcher = self.reader.searcher();
+        type BestMap = HashMap<(String, String), (u8, &'static str, LexKind, Option<i64>)>;
+        let mut best: BestMap = HashMap::new();
+
+        let record_doc = |best: &mut BestMap,
+                          addr: DocAddress,
+                          rank: u8,
+                          reason: &'static str|
+         -> Result<(), LexiconError> {
+            let doc: TantivyDocument = searcher.doc(addr)?;
+            let get = |field| {
+                doc.get_first(field)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string()
+            };
+            let module_id = get(self.f.module_id);
+            let key = get(self.f.key);
+            let kind = LexKind::parse(&get(self.f.kind));
+            let topic_id = doc.get_first(self.f.topic_id).and_then(|v| v.as_i64());
+            let slot = best
+                .entry((module_id, key))
+                .or_insert((rank, reason, kind, topic_id));
+            if rank < slot.0 {
+                *slot = (rank, reason, kind, topic_id);
+            }
+            Ok(())
+        };
+
+        // 0: chave Strong
+        let strong_q = all(vec![
+            term(self.f.kind, LexKind::Strong.as_str()),
+            term(self.f.key_norm, &strong),
+        ]);
+        for (_, addr) in searcher.search(&*strong_q, &TopDocs::with_limit(20).order_by_score())? {
+            record_doc(&mut best, addr, 0, "chave Strong")?;
+        }
+
+        // 1: ligação do Louw-Nida (e demais ligações do E1a.1)
+        if let Some(db) = self.links_db.as_ref().filter(|p| p.exists()) {
+            if let Ok(links) = links_for_strong(db, &strong) {
+                for link in links {
+                    let Some(module_id) = self.path_to_id.get(&link.target_module) else {
+                        continue;
+                    };
+                    let (rank, reason, kind) = match link.kind {
+                        crate::LinkKind::LouwNida => {
+                            (1u8, "ligação do Louw-Nida", LexKind::LouwNida)
+                        }
+                        crate::LinkKind::Ditnt => (2u8, "mesmo lema", LexKind::Ditnt),
+                        crate::LinkKind::Ditat => (3u8, "citado no verbete", LexKind::Ditat),
+                    };
+                    let key = clean_title(&link.key);
+                    let slot = best
+                        .entry((module_id.clone(), key))
+                        .or_insert((rank, reason, kind, None));
+                    if rank < slot.0 {
+                        *slot = (rank, reason, kind, None);
+                    }
+                }
+            }
+        }
+
+        // 2: mesmo lema
+        if let Some(lemma) = lemma_hint.map(str::trim).filter(|s| !s.is_empty()) {
+            let norm = match detect_script(lemma) {
+                Script::Greek => fold_greek(lemma),
+                Script::Hebrew => fold_hebrew(lemma),
+                _ => String::new(),
+            };
+            if !norm.is_empty() {
+                let lemma_q = term(self.f.lemma_norm, &norm);
+                for (_, addr) in
+                    searcher.search(&*lemma_q, &TopDocs::with_limit(limit).order_by_score())?
+                {
+                    record_doc(&mut best, addr, 2, "mesmo lema")?;
+                }
+            }
+        }
+
+        // 3: citado no verbete
+        let bare = format!("S{}", &strong[1..]);
+        let refs_q = any(vec![term(self.f.refs, &strong), term(self.f.refs, &bare)]);
+        for (_, addr) in searcher.search(&*refs_q, &TopDocs::with_limit(limit).order_by_score())? {
+            record_doc(&mut best, addr, 3, "citado no verbete")?;
+        }
+
+        let mut items: Vec<(u8, RelatedHit)> = best
+            .into_iter()
+            .map(|((module_id, key), (rank, reason, kind, topic_id))| {
+                (
+                    rank,
+                    RelatedHit {
+                        module_id,
+                        kind,
+                        key,
+                        topic_id,
+                        reason: reason.to_string(),
+                    },
+                )
+            })
+            .collect();
+        items.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then_with(|| a.1.kind.priority().cmp(&b.1.kind.priority()))
+                .then_with(|| a.1.module_id.cmp(&b.1.module_id))
+                .then_with(|| natural_cmp(&a.1.key, &b.1.key))
+        });
+        items.truncate(limit);
+        Ok(items.into_iter().map(|(_, hit)| hit).collect())
     }
 }
 

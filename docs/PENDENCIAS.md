@@ -18,3 +18,9 @@
 - Decodificador HTML (`convert_html`) extrai texto e parágrafos sem preservar formatação inline (negrito, itálico, links).
 - Índice reverso palavra → Strong tokeniza apenas palavras latinas; Bíblias originais com Strong (`tr(gr).nt`, `tra.nt`, `tanakh+.ot`) não entram no índice reverso.
 - Alguns módulos têm entradas com `content.data IS NULL` no próprio arquivo (`VINE`, `EnciclopédiaTematica`, `DChamplin`, `NDT`), exibidas como verbete vazio (`entry_empty`).
+
+## Ideias futuras (pedidas por Robert)
+
+- Conversor e criador de módulos (gerar módulos próprios, incluindo conversão de outros formatos).
+- Notas ao texto exibidas como ícones ao lado do versículo, da palavra (ancorada em módulo, versículo e posição da palavra nas Bíblias com Strong) ou do texto comentado.
+- Painel de contexto ao clicar numa palavra, com atalhos de consulta por léxico (Louw-Nida e outros), pesquisa e cópia de referência.

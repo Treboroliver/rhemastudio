@@ -8,11 +8,14 @@
     lexEntry,
     lexIndexBuild,
     lexIndexStatus,
+    lexRelated,
     lexSearch,
     lookupStrong,
     type LexEntryRequest,
     type LexIndexStatusDto,
     type LexProgressEvent,
+    type LexRelatedDto,
+    type LexRelatedItemDto,
     type LexSearchDto,
     type LexSearchHitDto,
     type LexiconEntryDto,
@@ -31,6 +34,12 @@
     statusFn?: () => Promise<LexIndexStatusDto>
     buildFn?: () => Promise<LexIndexStatusDto>
     loadEntryFn?: (moduleId: string, key: string, topicId?: number | null) => Promise<LexiconEntryDto>
+    loadRelatedFn?: (params: {
+      strongId?: string | null
+      moduleId?: string | null
+      key?: string | null
+      topicId?: number | null
+    }) => Promise<LexRelatedDto>
     searchDelay?: number
   }
 
@@ -56,11 +65,17 @@
     statusFn = lexIndexStatus,
     buildFn = lexIndexBuild,
     loadEntryFn = lexEntry,
+    loadRelatedFn = lexRelated,
     searchDelay = 120
   }: Props = $props()
 
   let visits = $state<Visit[]>([])
   let entry = $state<LexiconEntryDto | null>(null)
+  let primaryEntry = $state<LexiconEntryDto | null>(null)
+  let relatedItems = $state<LexRelatedItemDto[]>([])
+  let relatedOpen = $state(false)
+  let relatedActive = $state(0)
+  let preferredModuleId = $state<string | null>(null)
   let errorCode = $state<string | null>(null)
   let loading = $state(false)
   let sequence = 0
@@ -138,8 +153,39 @@
     const id = ++sequence
     loading = true
     entry = null
+    primaryEntry = null
+    relatedItems = []
+    relatedOpen = false
     errorCode = null
+    const hasTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+    const useRelated = hasTauri || loadRelatedFn !== lexRelated
     try {
+      if (useRelated) {
+        let res: LexRelatedDto | undefined
+        try {
+          res = await loadRelatedFn(
+            moduleId ? { moduleId, key, topicId } : { strongId: key }
+          )
+        } catch (cause) {
+          if (loadRelatedFn !== lexRelated) throw cause
+        }
+        if (id !== sequence) return
+        if (res?.primary) {
+          primaryEntry = res.primary
+          relatedItems = res.related
+          const preferred = preferredModuleId
+            ? res.related.find((r) => r.module_id === preferredModuleId && !r.error)
+            : undefined
+          if (preferred) {
+            const switched = await loadEntryFn(preferred.module_id, preferred.key, preferred.topic_id)
+            if (id !== sequence) return
+            entry = switched
+          } else {
+            entry = res.primary
+          }
+          return
+        }
+      }
       const found = moduleId ? await loadEntryFn(moduleId, key, topicId) : await lookupStrong(key)
       if (id !== sequence) return
       entry = found
@@ -148,6 +194,59 @@
       errorCode = asApiError(cause).code
     } finally {
       if (id === sequence) loading = false
+    }
+  }
+
+  async function selectRelated(item: LexRelatedItemDto | null) {
+    relatedOpen = false
+    if (!item) {
+      if (primaryEntry) {
+        preferredModuleId = primaryEntry.module_id
+        entry = primaryEntry
+      }
+      return
+    }
+    if (item.error) return
+    preferredModuleId = item.module_id
+    const id = ++sequence
+    loading = true
+    errorCode = null
+    try {
+      const found = await loadEntryFn(item.module_id, item.key, item.topic_id)
+      if (id !== sequence) return
+      entry = found
+    } catch (cause) {
+      if (id !== sequence) return
+      errorCode = asApiError(cause).code
+    } finally {
+      if (id === sequence) loading = false
+    }
+  }
+
+  function onRelatedKeydown(event: KeyboardEvent) {
+    const total = relatedItems.length + (primaryEntry ? 1 : 0)
+    if (!total) return
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      relatedOpen = false
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      relatedOpen = true
+      relatedActive = (relatedActive + 1) % total
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      relatedOpen = true
+      relatedActive = (relatedActive - 1 + total) % total
+    } else if (event.key === 'Enter' && relatedOpen) {
+      event.preventDefault()
+      if (primaryEntry && relatedActive === 0) {
+        void selectRelated(null)
+      } else {
+        const idx = primaryEntry ? relatedActive - 1 : relatedActive
+        const item = relatedItems[idx]
+        if (item) void selectRelated(item)
+      }
     }
   }
 
@@ -448,6 +547,58 @@
     {#if loading}
       <p class="panel-empty" role="status">{t('lexiconLoading')}</p>
     {:else if entry}
+      {#if relatedItems.length > 0}
+        <div class="lex-related-bar">
+          <button
+            type="button"
+            class="quiet compact-control lex-related-toggle"
+            aria-expanded={relatedOpen}
+            aria-haspopup="listbox"
+            aria-label={t('lexOtherDictionariesLabel')}
+            onclick={() => {
+              relatedOpen = !relatedOpen
+              relatedActive = 0
+            }}
+            onkeydown={onRelatedKeydown}
+          >{t('lexOtherDictionaries', { count: relatedItems.length })} ▾</button>
+          {#if relatedOpen}
+            <ul class="lex-related-menu" role="listbox" aria-label={t('lexOtherDictionariesLabel')}>
+              {#if primaryEntry}
+                <li>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={entry.module_id === primaryEntry.module_id && entry.key === primaryEntry.key}
+                    class="lex-hit"
+                    class:active={relatedActive === 0}
+                    onclick={() => void selectRelated(null)}
+                  >
+                    <span class="lex-hit-key">{primaryEntry.module_title}</span>
+                    <span class="lex-related-reason">{t('lexPrimaryEntry')}</span>
+                  </button>
+                </li>
+              {/if}
+              {#each relatedItems as item, idx (`${item.module_id}-${item.key}`)}
+                {@const optIdx = primaryEntry ? idx + 1 : idx}
+                <li>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={entry.module_id === item.module_id && entry.key === item.key}
+                    disabled={!!item.error}
+                    class="lex-hit"
+                    class:active={relatedActive === optIdx}
+                    onclick={() => void selectRelated(item)}
+                  >
+                    <span class="lex-hit-key">{item.module_title} · {item.title}</span>
+                    <span class="lex-related-reason">{item.error ?? item.reason}</span>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
+      {/if}
       <article class="lexicon-entry" aria-label={t('lexiconEntryLabel', { key: entry.key })}>
         <header>
           <h3>{entry.title}</h3>
@@ -475,6 +626,8 @@
       <p class="panel-empty" role="status">{t('lexiconModuleMissing')}</p>
     {:else if errorCode === 'module_protected'}
       <p class="panel-empty" role="status">{t('lexiconModuleProtected')}</p>
+    {:else if errorCode === 'module_corrupted'}
+      <p class="panel-empty" role="status">{t('lexiconCorrupted')}</p>
     {:else if errorCode}
       <div class="panel-empty" role="alert">
         <p>{t('lexiconError')}</p>

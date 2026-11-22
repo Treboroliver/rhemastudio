@@ -766,6 +766,11 @@ fn module_kind(path: &Path, config_type: Option<&str>) -> Result<ModuleKind, Str
     if let (Some(extension_kind), Some(config_kind)) = (extension_kind, config_kind)
         && extension_kind != config_kind
     {
+        if extension_kind == ModuleKind::Dictionary
+            && matches!(config_kind, ModuleKind::Commentary | ModuleKind::Book)
+        {
+            return Ok(ModuleKind::Dictionary);
+        }
         return Err("Extensão e config.type indicam tipos diferentes".to_string());
     }
     Ok(config_kind

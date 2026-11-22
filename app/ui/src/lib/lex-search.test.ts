@@ -272,4 +272,84 @@ describe('Busca léxica na CommandBar e na aba Léxico', () => {
     await fireEvent.click(removeButtons[1])
     expect(onRemoveFolder).toHaveBeenCalledWith('C:\\ModulosB')
   })
+
+  it('exibe controle Outros dicionários (N), lembra escolha e oculta quando N=0', async () => {
+    const loadRelatedFn = vi
+      .fn()
+      .mockResolvedValueOnce({
+        primary: {
+          key: 'G25',
+          title: 'G25',
+          original_word: 'ἀγαπάω',
+          module_id: 'strong1',
+          module_title: 'Strong Principal',
+          degraded: false,
+          nodes: [{ type: 'text', value: 'Verbete principal' }]
+        },
+        related: [
+          {
+            module_id: 'louw1',
+            module_title: 'Louw-Nida',
+            kind: 'louw_nida',
+            key: '25.43',
+            topic_id: 43,
+            title: '25.43',
+            reason: 'ligação do Louw-Nida',
+            error: null
+          }
+        ]
+      })
+      .mockResolvedValueOnce({
+        primary: {
+          key: 'G3056',
+          title: 'G3056',
+          original_word: 'λόγος',
+          module_id: 'strong1',
+          module_title: 'Strong Principal',
+          degraded: false,
+          nodes: [{ type: 'text', value: 'Verbete G3056' }]
+        },
+        related: []
+      })
+    const loadEntryFn = vi.fn().mockResolvedValue({
+      key: '25.43',
+      title: '25.43',
+      original_word: null,
+      module_id: 'louw1',
+      module_title: 'Louw-Nida',
+      degraded: false,
+      nodes: [{ type: 'text', value: 'Verbete Louw-Nida' }]
+    })
+
+    const { rerender } = render(LexiconTab, {
+      t,
+      request: { ids: ['G25'], seq: 1 },
+      onVerse: vi.fn(),
+      onManageFolders: vi.fn(),
+      loadRelatedFn,
+      loadEntryFn
+    })
+    await vi.advanceTimersByTimeAsync(10)
+
+    const toggle = screen.getByText(/Outros dicionários \(1\)/)
+    expect(toggle).toBeTruthy()
+    await fireEvent.click(toggle)
+    expect(screen.getByText('ligação do Louw-Nida')).toBeTruthy()
+    await fireEvent.click(screen.getByText(/Louw-Nida · 25\.43/))
+    await vi.advanceTimersByTimeAsync(10)
+
+    expect(loadEntryFn).toHaveBeenCalledWith('louw1', '25.43', 43)
+    expect(screen.getByText('Verbete Louw-Nida')).toBeTruthy()
+
+    await rerender({
+      t,
+      request: { ids: ['G3056'], seq: 2 },
+      onVerse: vi.fn(),
+      onManageFolders: vi.fn(),
+      loadRelatedFn,
+      loadEntryFn
+    })
+    await vi.advanceTimersByTimeAsync(10)
+    expect(screen.queryByText(/Outros dicionários/)).toBeNull()
+  })
 })
