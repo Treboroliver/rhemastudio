@@ -28,3 +28,6 @@
 - Conversor e criador de módulos (gerar módulos próprios, incluindo conversão de outros formatos).
 - Notas ao texto exibidas como ícones ao lado do versículo, da palavra (ancorada em módulo, versículo e posição da palavra nas Bíblias com Strong) ou do texto comentado.
 - Painel de contexto ao clicar numa palavra, com atalhos de consulta por léxico (Louw-Nida e outros), pesquisa e cópia de referência.
+- Mapa de versificação entre Bíblias (diferenças de numeração entre traduções, ex.: Ap 12, 1Sm 20, 1Rs 22, 2Co 13).
+- Bíblia com números Strong a partir de texto marcado.
+- Sugestão de marcações Strong via índice reverso, sempre com revisão humana.

@@ -12,6 +12,11 @@ Marque `[x]` ao concluir. Cada milestone só termina quando **todos** os critér
 - [x] E1b.4 Abertura dos dicionários comuns, lemas/refs em genéricos (`v3`) e `Outros dicionários (N)` (`lex_related`); ver [09-indice-lexical.md](09-indice-lexical.md).
 - [x] E1b.5 Links inline (`\fldrslt`), zlib (`compressed=1`), classificação `config.type`, `meta`, `hidden=1` e erros de comentário; ver [09-indice-lexical.md](09-indice-lexical.md).
 
+## Autoria — A1
+- [x] A1.1 Importador de livros pessoais (`.docx`) — leitura em fluxo, reconhecimento de marcadores, IR e relatório de validação (`rhema-import` e `rhema-cli import docx`); ver [11-importador-docx.md](11-importador-docx.md).
+- [ ] A1.2 Formato de módulo próprio e leitura no app.
+- [ ] A1.3 Exportar para `.twm`.
+
 ---
 
 ## M0 — Fundação

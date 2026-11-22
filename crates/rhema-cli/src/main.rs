@@ -135,6 +135,33 @@ enum Commands {
         #[arg(long, default_value_t = 10)]
         count: usize,
     },
+
+    /// Importação e validação de documentos pessoais (.docx)
+    Import {
+        #[command(subcommand)]
+        command: ImportCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ImportCommands {
+    /// Lê e valida um documento .docx (sem gravar módulos e sem exibir texto de verbete)
+    Docx {
+        /// Caminho para o arquivo .docx
+        file: PathBuf,
+
+        /// Tipo de obra: dict, comm ou book
+        #[arg(long, value_parser = ["dict", "comm", "book"])]
+        kind: String,
+
+        /// Imprime o relatório completo de validação em formato estruturado
+        #[arg(long)]
+        report: bool,
+
+        /// Nível de título que inicia entradas (opcional)
+        #[arg(long)]
+        entry_level: Option<u8>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -410,6 +437,29 @@ fn main() -> Result<()> {
             Ok(())
         }
         Commands::RtfSample { file, count } => rtf_sample(&file, count),
+        Commands::Import { command } => match command {
+            ImportCommands::Docx {
+                file,
+                kind,
+                report,
+                entry_level,
+            } => {
+                let import_kind = match kind.as_str() {
+                    "dict" => rhema_import::ImportKind::Dict,
+                    "comm" => rhema_import::ImportKind::Comm,
+                    _ => rhema_import::ImportKind::Book,
+                };
+                let mut opts = rhema_import::ImportOptions::report_only(import_kind);
+                opts.entry_level = entry_level;
+                let res = rhema_import::import_docx(&file, &opts)?;
+                if report {
+                    println!("{}", serde_json::to_string_pretty(&res.report)?);
+                } else {
+                    print!("{}", res.report.format_summary());
+                }
+                Ok(())
+            }
+        },
     }
 }
 

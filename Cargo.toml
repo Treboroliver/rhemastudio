@@ -8,6 +8,7 @@ members = [
     "crates/rhema-search",
     "crates/rhema-lexicon",
     "crates/rhema-sermon",
+    "crates/rhema-import",
     "crates/rhema-cli",
     "tools/gen-fixtures",
     "app/src-tauri",
