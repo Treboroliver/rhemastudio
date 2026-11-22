@@ -1337,20 +1337,46 @@ mod tests {
         use std::path::Path;
         use std::time::Instant;
 
-        let modules = [
+        let preferred = [
             "Mickelson's Strong.dct.twm",
             "Holman-AT.cmt.twm",
             "NICNT.cmt.twm",
             "VidaNova.cmt.twm",
             "Strong_AMG2.dct.twm",
         ];
-        for filename in modules {
-            let path = Path::new(&root).join(filename);
-            assert!(
-                path.is_file(),
-                "Módulo de teste ausente: {}",
-                path.display()
-            );
+        let mut selected: Vec<(String, std::path::PathBuf)> = preferred
+            .iter()
+            .filter_map(|filename| {
+                let path = Path::new(&root).join(filename);
+                path.is_file().then(|| ((*filename).to_string(), path))
+            })
+            .collect();
+        if selected.is_empty() {
+            if let Ok(entries) = std::fs::read_dir(&root) {
+                let mut fallback: Vec<(String, std::path::PathBuf)> = entries
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| {
+                        p.is_file()
+                            && p.file_name().is_some_and(|n| {
+                                let s = n.to_string_lossy().to_ascii_lowercase();
+                                s.ends_with(".cmt.twm") || s.ends_with(".dct.twm")
+                            })
+                    })
+                    .filter_map(|p| {
+                        let name = p.file_name()?.to_string_lossy().into_owned();
+                        Some((name, p))
+                    })
+                    .collect();
+                fallback.sort_by(|a, b| a.0.cmp(&b.0));
+                selected = fallback.into_iter().take(3).collect();
+            }
+        }
+        if selected.is_empty() {
+            eprintln!("real_module_samples_are_optional_and_read_only: ignorado (nenhum .twm disponível em RHEMA_TEST_MODULES)");
+            return;
+        }
+        for (filename, path) in selected {
             match crate::ensure_twm_unprotected(&path) {
                 Ok(()) => {}
                 Err(rhema_core::ModuleError::EncryptedModule) => {

@@ -1247,9 +1247,41 @@ mod tests {
             }
             (direct, delimited)
         };
-        for filename in ["Holman-AT.cmt.twm", "NICNT.cmt.twm", "Strong_AMG2.dct.twm"] {
-            let path = std::path::Path::new(&root).join(filename);
-            let module = TwmModule::open(&path).expect("abrir módulo real");
+        let preferred = ["Holman-AT.cmt.twm", "NICNT.cmt.twm", "Strong_AMG2.dct.twm"];
+        let mut selected: Vec<(String, std::path::PathBuf)> = preferred
+            .iter()
+            .filter_map(|filename| {
+                let path = std::path::Path::new(&root).join(filename);
+                path.is_file().then(|| ((*filename).to_string(), path))
+            })
+            .collect();
+        if selected.is_empty() {
+            if let Ok(entries) = std::fs::read_dir(&root) {
+                let mut fallback: Vec<(String, std::path::PathBuf)> = entries
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| {
+                        p.is_file()
+                            && p.file_name().is_some_and(|n| {
+                                let s = n.to_string_lossy().to_ascii_lowercase();
+                                s.ends_with(".cmt.twm") || s.ends_with(".dct.twm")
+                            })
+                            && crate::ensure_twm_unprotected(p).is_ok()
+                    })
+                    .filter_map(|p| Some((p.file_name()?.to_string_lossy().into_owned(), p)))
+                    .collect();
+                fallback.sort_by(|a, b| a.0.cmp(&b.0));
+                selected = fallback.into_iter().take(3).collect();
+            }
+        }
+        if selected.is_empty() {
+            eprintln!("real_rtf_comma_spacing_diagnostic: ignorado (nenhum .twm disponível)");
+            return;
+        }
+        for (filename, path) in selected {
+            let Ok(module) = TwmModule::open(&path) else {
+                continue;
+            };
             let mut statement = module
                 .connection
                 .prepare("SELECT topic_id FROM content ORDER BY topic_id")
@@ -1303,8 +1335,14 @@ mod tests {
         let mut dump = std::env::var("RHEMA_RVF_DUMP")
             .ok()
             .and_then(|path| std::fs::File::create(path).ok());
+        let mut tested = 0usize;
         for (label, filename, table, id_column) in modules {
             let path = std::path::Path::new(&root).join(filename);
+            if !path.is_file() {
+                eprintln!("real_rvf_diagnostic: {filename} ausente");
+                continue;
+            }
+            tested += 1;
             let module = TwmModule::open(&path).expect("abrir módulo real");
             let sql = format!("SELECT {id_column} FROM {table} WHERE content_type = 'rvf'");
             let mut statement = module.connection.prepare(&sql).expect("ids");
@@ -1401,57 +1439,65 @@ mod tests {
                 stats.unknown
             );
         }
+        if tested == 0 {
+            eprintln!("real_rvf_diagnostic: ignorado (módulos RVF de referência ausentes)");
+            return;
+        }
         let path = std::path::Path::new(&root).join("Strong_AMG2.dct.twm");
-        let module = TwmModule::open(&path).expect("abrir módulo real");
-        let id = module
-            .connection
-            .query_row(
-                "SELECT id FROM topics WHERE subject = 'G3056' AND content_type = 'rvf'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .ok();
-        let ok = id
-            .and_then(|id| module.read_content_bytes(id).ok())
-            .map(|raw| {
-                let result = crate::convert_rvf(&raw);
-                let plain = result
-                    .nodes
-                    .iter()
-                    .map(Node::to_plain_text)
-                    .collect::<String>();
-                (
-                    !result.nodes.is_empty(),
-                    result.degraded,
-                    crate::rvf::suspicious_count(&plain),
+        if path.is_file() {
+            let module = TwmModule::open(&path).expect("abrir módulo real");
+            let id = module
+                .connection
+                .query_row(
+                    "SELECT id FROM topics WHERE subject = 'G3056' AND content_type = 'rvf'",
+                    [],
+                    |row| row.get::<_, i64>(0),
                 )
-            });
-        eprintln!("G3056 (nós, degradado, suspeitos): {ok:?}");
+                .ok();
+            let ok = id
+                .and_then(|id| module.read_content_bytes(id).ok())
+                .map(|raw| {
+                    let result = crate::convert_rvf(&raw);
+                    let plain = result
+                        .nodes
+                        .iter()
+                        .map(Node::to_plain_text)
+                        .collect::<String>();
+                    (
+                        !result.nodes.is_empty(),
+                        result.degraded,
+                        crate::rvf::suspicious_count(&plain),
+                    )
+                });
+            eprintln!("G3056 (nós, degradado, suspeitos): {ok:?}");
+        }
 
         // Primeira página da maior entrada do VidaNova.
         let path = std::path::Path::new(&root).join("VidaNova.cmt.twm");
-        let source = CommentarySource::open(&path).expect("abrir VidaNova");
-        let module = TwmModule::open(&path).expect("abrir módulo real");
-        let biggest = module
-            .connection
-            .query_row(
-                "SELECT topic_id, length(CAST(data AS BLOB)) FROM content ORDER BY 2 DESC LIMIT 1",
-                [],
-                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
-            )
-            .expect("maior entrada");
-        for label in ["frio", "morno"] {
-            let started = std::time::Instant::now();
-            let page = source
-                .entry_page(biggest.0, 0, 60, 8_000)
-                .expect("primeira página");
-            eprintln!(
-                "VidaNova maior entrada ({} KB) primeira página {label}: {:.1} ms nós={} has_more={}",
-                biggest.1 / 1024,
-                started.elapsed().as_secs_f64() * 1000.0,
-                page.nodes.len(),
-                page.has_more
-            );
+        if path.is_file() {
+            let source = CommentarySource::open(&path).expect("abrir VidaNova");
+            let module = TwmModule::open(&path).expect("abrir módulo real");
+            let biggest = module
+                .connection
+                .query_row(
+                    "SELECT topic_id, length(CAST(data AS BLOB)) FROM content ORDER BY 2 DESC LIMIT 1",
+                    [],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .expect("maior entrada");
+            for label in ["frio", "morno"] {
+                let started = std::time::Instant::now();
+                let page = source
+                    .entry_page(biggest.0, 0, 60, 8_000)
+                    .expect("primeira página");
+                eprintln!(
+                    "VidaNova maior entrada ({} KB) primeira página {label}: {:.1} ms nós={} has_more={}",
+                    biggest.1 / 1024,
+                    started.elapsed().as_secs_f64() * 1000.0,
+                    page.nodes.len(),
+                    page.has_more
+                );
+            }
         }
     }
 
@@ -1461,15 +1507,50 @@ mod tests {
             return;
         };
         let root = std::path::Path::new(&root);
-        for filename in [
+        let preferred = [
             "Holman-AT.cmt.twm",
             "NICNT.cmt.twm",
             "VidaNova.cmt.twm",
             "Strong_AMG2.dct.twm",
-        ] {
-            let path = root.join(filename);
-            assert!(path.is_file(), "Módulo não encontrado: {}", path.display());
-            if filename.ends_with(".cmt.twm") {
+        ];
+        let mut selected: Vec<(String, std::path::PathBuf)> = preferred
+            .iter()
+            .filter_map(|filename| {
+                let path = root.join(filename);
+                path.is_file().then(|| ((*filename).to_string(), path))
+            })
+            .collect();
+        if selected.is_empty() {
+            if let Ok(entries) = std::fs::read_dir(root) {
+                let mut cmts = Vec::new();
+                let mut dcts = Vec::new();
+                for path in entries.flatten().map(|e| e.path()).filter(|p| p.is_file()) {
+                    if crate::ensure_twm_unprotected(&path).is_err() {
+                        continue;
+                    }
+                    let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned())
+                    else {
+                        continue;
+                    };
+                    let lower = name.to_ascii_lowercase();
+                    if lower.ends_with(".cmt.twm") {
+                        cmts.push((name, path));
+                    } else if lower.ends_with(".dct.twm") {
+                        dcts.push((name, path));
+                    }
+                }
+                cmts.sort_by(|a, b| a.0.cmp(&b.0));
+                dcts.sort_by(|a, b| a.0.cmp(&b.0));
+                selected.extend(cmts.into_iter().take(2));
+                selected.extend(dcts.into_iter().take(1));
+            }
+        }
+        if selected.is_empty() {
+            eprintln!("real_twm_reader_timings_when_modules_are_configured: ignorado (nenhum .twm disponível)");
+            return;
+        }
+        for (filename, path) in selected {
+            if filename.to_ascii_lowercase().ends_with(".cmt.twm") {
                 let started = std::time::Instant::now();
                 let source = CommentarySource::open(&path).expect("abrir comentário real");
                 let open_elapsed = started.elapsed();

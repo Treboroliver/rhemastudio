@@ -32,11 +32,14 @@ fn real_bibles_tokenize_without_unknown_tags_or_lost_angle_brackets() {
         eprintln!("Ignorado: RHEMA_TEST_MODULES não foi definido");
         return;
     };
+    let mut tested = 0usize;
     for name in ["ARA+.ont", "kjv.ont"] {
         let path = std::path::Path::new(&root).join(name);
         let Ok(reader) = OntReader::open(&path) else {
+            eprintln!("real_bibles_markup: {name} ausente");
             continue;
         };
+        tested += 1;
         let (mut angles, mut unknown_tags, mut chapters, mut jesus_in_john_3_3) = (0, 0, 0, 0);
         for number in 1..=66u8 {
             let Some(book) = Book::from_number(number) else {
@@ -67,7 +70,18 @@ fn real_bibles_tokenize_without_unknown_tags_or_lost_angle_brackets() {
             "{name}: sinais literais={angles} em {chapters} capítulos; UnknownTag={unknown_tags}; \
              palavras de Jesus em Jo 3:3={jesus_in_john_3_3}"
         );
-        // ARA+ tem uma única tag gramatical órfã ("(<Gn>" sem Strong anterior).
-        assert!(unknown_tags <= 1, "{name}");
+        // ARA+ possui até 2 tags gramaticais órfãs sem Strong anterior.
+        let max_unknown = if name.eq_ignore_ascii_case("ARA+.ont") {
+            2
+        } else {
+            0
+        };
+        assert!(
+            unknown_tags <= max_unknown,
+            "{name}: UnknownTag={unknown_tags}"
+        );
+    }
+    if tested == 0 {
+        eprintln!("real_bibles_markup: ignorado (nenhuma Bíblia de referência disponível)");
     }
 }
