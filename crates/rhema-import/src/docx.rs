@@ -71,6 +71,7 @@ struct StyleInfo {
 #[derive(Default)]
 struct RelsInfo {
     internal_targets: HashMap<String, String>,
+    bible_external_targets: HashMap<String, String>,
     external_domains: BTreeMap<String, usize>,
 }
 
@@ -218,6 +219,8 @@ struct ImportState<'a> {
     in_r: bool,
     in_rpr: bool,
     in_t: bool,
+    active_bible_hyperlink: Option<String>,
+    hyperlink_buf: String,
     cur_style: SpanStyle,
     cur_run_text: String,
     cur_p: ParagraphBuilder,
@@ -283,6 +286,8 @@ impl<'a> ImportState<'a> {
             in_r: false,
             in_rpr: false,
             in_t: false,
+            active_bible_hyperlink: None,
+            hyperlink_buf: String::new(),
             cur_style: SpanStyle::default(),
             cur_run_text: String::new(),
             cur_p: ParagraphBuilder::default(),
@@ -365,6 +370,14 @@ impl<'a> ImportState<'a> {
                 self.in_r = true;
                 self.cur_style = SpanStyle::default();
                 self.cur_run_text.clear();
+            }
+            "hyperlink" if self.in_p && self.table_depth == 0 => {
+                if let Some(rid) = attr_val(e, "id") {
+                    if let Some(target) = self.rels.bible_external_targets.get(&rid) {
+                        self.active_bible_hyperlink = Some(target.clone());
+                        self.hyperlink_buf.clear();
+                    }
+                }
             }
             "rPr" if self.in_r => self.in_rpr = true,
             "t" if self.in_r => self.in_t = true,
@@ -482,11 +495,25 @@ impl<'a> ImportState<'a> {
             "r" => {
                 if self.in_p && !self.cur_run_text.is_empty() {
                     let text = std::mem::take(&mut self.cur_run_text);
-                    self.cur_p.runs.push((text, self.cur_style));
+                    if self.active_bible_hyperlink.is_some() {
+                        self.hyperlink_buf.push_str(&text);
+                    } else {
+                        self.cur_p.runs.push((text, self.cur_style));
+                    }
                 }
                 self.in_r = false;
                 self.in_rpr = false;
                 self.in_t = false;
+            }
+            "hyperlink" if self.in_p && self.table_depth == 0 => {
+                if let Some(target) = self.active_bible_hyperlink.take() {
+                    let label = std::mem::take(&mut self.hyperlink_buf);
+                    if !label.is_empty() {
+                        // Codifica como link de Bíblia inline preservando o rótulo e o destino tw://
+                        let marker = format!("[[{label} >> Bible: {target}]]");
+                        self.cur_p.runs.push((marker, self.cur_style));
+                    }
+                }
             }
             "numPr" => self.in_numpr = false,
             "pPr" => self.in_ppr = false,
@@ -604,18 +631,26 @@ impl<'a> ImportState<'a> {
         }
 
         // Parágrafo comum ou item de lista
-        let anchors: Vec<EntryKey> = parsed
-            .tags
-            .into_iter()
-            .filter_map(|(k, at_start)| {
-                if self.options.kind == ImportKind::Comm && at_start && k.kind == KeyType::Bible {
-                    self.record_entry_key(&k);
-                    Some(k)
-                } else {
-                    None
+        let mut anchors = Vec::new();
+        for (k, at_start) in parsed.tags {
+            if self.options.kind == ImportKind::Comm && at_start && k.kind == KeyType::Bible {
+                self.record_entry_key(&k);
+                anchors.push(k);
+            } else if self.options.kind == ImportKind::Dict {
+                if let Some(entry) = self.current_entry.as_mut() {
+                    if matches!(
+                        k.kind,
+                        KeyType::Headword
+                            | KeyType::Louw
+                            | KeyType::Twot
+                            | KeyType::GreekGk
+                            | KeyType::HebrewGk
+                    ) {
+                        entry.keys.push(k);
+                    }
                 }
-            })
-            .collect();
+            }
+        }
 
         if self.options.kind == ImportKind::Comm
             && !anchors.is_empty()
@@ -1136,7 +1171,16 @@ fn parse_rels(bytes: &[u8]) -> Result<RelsInfo, ImportError> {
                             .is_some_and(|m| m.eq_ignore_ascii_case("External"))
                         {
                             let dom = extract_domain_only(&tgt);
-                            *info.external_domains.entry(dom).or_default() += 1;
+                            *info.external_domains.entry(dom.clone()).or_default() += 1;
+                            if dom.starts_with("bible.")
+                                || tgt.to_ascii_lowercase().starts_with("tw://bible.")
+                            {
+                                if let Some(rid) = id {
+                                    let clean =
+                                        tgt.split('|').next().unwrap_or(&tgt).trim().to_string();
+                                    info.bible_external_targets.insert(rid, clean);
+                                }
+                            }
                         } else if let Some(rid) = id {
                             info.internal_targets.insert(rid, tgt);
                         }

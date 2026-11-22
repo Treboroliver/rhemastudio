@@ -10,8 +10,11 @@ flate2 = "1.1"
 quick-xml = "0.42"
 rhema-core = { workspace = true }
 rhema-refs = { path = "../rhema-refs" }
+rusqlite = { version = "0.33", features = ["bundled"] }
 serde = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+rhema-library = { path = "../rhema-library" }
+rhema-twformat = { path = "../rhema-twformat" }
 tempfile = "3"

@@ -31,3 +31,6 @@
 - Mapa de versificação entre Bíblias (diferenças de numeração entre traduções, ex.: Ap 12, 1Sm 20, 1Rs 22, 2Co 13).
 - Bíblia com números Strong a partir de texto marcado.
 - Sugestão de marcações Strong via índice reverso, sempre com revisão humana.
+- Imagens embutidas em RTF na exportação `.twm` (hoje omitidas com aviso e contagem).
+- Exportação de livros gerais (`--kind book` / `.gbk.twm`).
+- Validação manual dos módulos `.twm` gerados diretamente no software theWord.

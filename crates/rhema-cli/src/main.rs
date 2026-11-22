@@ -165,6 +165,30 @@ enum ImportCommands {
         /// Grava lista detalhada de problemas (uma linha por problema) fora do repositório
         #[arg(long)]
         problemas: Option<PathBuf>,
+
+        /// Caminho do módulo .twm a gerar (fora do repositório e de modulos-teste)
+        #[arg(long)]
+        out: Option<PathBuf>,
+
+        /// Título do módulo .twm (obrigatório com --out)
+        #[arg(long)]
+        title: Option<String>,
+
+        /// Descrição do módulo .twm
+        #[arg(long, default_value = "")]
+        description: String,
+
+        /// Idioma ISO 639-2 do módulo (ex.: por, eng)
+        #[arg(long, default_value = "por")]
+        lang: String,
+
+        /// Versão do módulo (ex.: 1.0)
+        #[arg(long, default_value = "1.0")]
+        version: String,
+
+        /// Sobrescreve o arquivo .twm de saída se ele já existir
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -448,26 +472,79 @@ fn main() -> Result<()> {
                 report,
                 entry_level,
                 problemas,
+                out,
+                title,
+                description,
+                lang,
+                version,
+                force,
             } => {
                 if let Some(ref p) = problemas {
                     ensure_safe_output_path(p)?;
+                }
+                if let Some(ref out_path) = out {
+                    ensure_safe_output_path(out_path)?;
+                    if title.as_deref().is_none_or(|t| t.trim().is_empty()) {
+                        bail!("--title é obrigatório quando --out é informado");
+                    }
+                    if kind == "book" {
+                        bail!("Exportação .twm ainda não suporta --kind book (use dict ou comm)");
+                    }
                 }
                 let import_kind = match kind.as_str() {
                     "dict" => rhema_import::ImportKind::Dict,
                     "comm" => rhema_import::ImportKind::Comm,
                     _ => rhema_import::ImportKind::Book,
                 };
-                let mut opts = rhema_import::ImportOptions::report_only(import_kind);
+                let mut opts = if out.is_some() {
+                    rhema_import::ImportOptions::new(import_kind)
+                } else {
+                    rhema_import::ImportOptions::report_only(import_kind)
+                };
                 opts.entry_level = entry_level;
                 opts.collect_problems = problemas.is_some();
-                let res = rhema_import::import_docx(&file, &opts)?;
+                let mut res = rhema_import::import_docx(&file, &opts)?;
+
+                let export_report = if let Some(out_path) = out {
+                    let mut exp = rhema_import::TwmExportOptions::new(
+                        out_path,
+                        title.unwrap_or_default(),
+                        description,
+                    );
+                    exp.lang = lang;
+                    exp.version = version;
+                    exp.force = force;
+                    let extra = problemas.is_some().then_some(&mut res.problems);
+                    Some(rhema_import::write_twm(
+                        import_kind,
+                        &res.entries,
+                        &exp,
+                        extra,
+                    )?)
+                } else {
+                    None
+                };
+
                 if let Some(ref p) = problemas {
                     rhema_import::write_problems_file(p, &res.problems)?;
                 }
                 if report {
-                    println!("{}", serde_json::to_string_pretty(&res.report)?);
+                    if let Some(exp) = export_report {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&serde_json::json!({
+                                "validation": res.report,
+                                "export": exp,
+                            }))?
+                        );
+                    } else {
+                        println!("{}", serde_json::to_string_pretty(&res.report)?);
+                    }
                 } else {
                     print!("{}", res.report.format_summary());
+                    if let Some(exp) = export_report {
+                        print!("{}", exp.format_summary());
+                    }
                 }
                 Ok(())
             }

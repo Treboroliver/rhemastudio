@@ -40,4 +40,13 @@ pub enum ImportError {
 
     #[error("tabela excedeu o limite de células ({cells} > {limit})")]
     TableTooLarge { cells: usize, limit: usize },
+
+    #[error("arquivo de saída já existe (use --force para sobrescrever): {0}")]
+    OutputExists(String),
+
+    #[error("tipo de obra não suportado para exportação .twm: {0}")]
+    UnsupportedExportKind(String),
+
+    #[error("erro SQLite ao gravar .twm: {0}")]
+    Sqlite(#[from] rusqlite::Error),
 }

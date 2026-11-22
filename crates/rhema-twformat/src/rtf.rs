@@ -921,6 +921,26 @@ pub(crate) fn parse_link_target(instruction: &str) -> LinkTarget {
             return LinkTarget::Dictionary(suffix.split('|').next().unwrap_or(suffix).to_string());
         }
     }
+    if let Some((_, suffix)) = target.split_once("tw://[self]?t=") {
+        let key = suffix
+            .split(['&', '|', '#'])
+            .next()
+            .unwrap_or(suffix)
+            .trim();
+        if !key.is_empty() {
+            return LinkTarget::Dictionary(key.to_string());
+        }
+    }
+    if let Some((_, suffix)) = target.split_once("tw://[strong]?") {
+        let key = suffix
+            .split(['&', '|', '#'])
+            .next()
+            .unwrap_or(suffix)
+            .trim();
+        if !key.is_empty() {
+            return LinkTarget::Dictionary(key.to_string());
+        }
+    }
     if let Some((_, suffix)) = target.split_once("id=") {
         let reference = suffix.split('|').next().unwrap_or(suffix);
         let parsed = (|| {

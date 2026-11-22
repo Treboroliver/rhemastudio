@@ -17,7 +17,8 @@ Referências: [plano](06-plano-exegese.md) e [inventário E0](07-inventario-exeg
 - E1b.4: concluído — correção de abertura dos dicionários comuns (`twm.rs`/`rhema-library`), lemas/refs em genéricos (`v3`) e menu `Outros dicionários (N)` (`lex_related`); ver [09-indice-lexical.md](09-indice-lexical.md).
 - E1b.5: concluído — links RTF inline (`\fldrslt`), descompressão zlib (`compressed=1`, teto de 64 MB `content_too_large`), classificação por `config.type`, resolução `meta`, `topics_flags.hidden=1` e erros de comentário com `lex-errors.log`; ver [09-indice-lexical.md](09-indice-lexical.md).
 - A1.1: concluído — crate `rhema-import` (leitura `.docx` em fluxo, limites contra bomba de zip/entrada/imagem/tabela, gramática de marcadores, IR e relatório de validação) e CLI `rhema-cli import docx`; ver [11-importador-docx.md](11-importador-docx.md).
-- A1.2–A1.3: pendentes — formato de módulo próprio/leitura no app e exportação para `.twm`.
+- A1.2: concluído — gravador `.twm` de dicionário e comentário a partir da IR (`--out`, RTF Tahoma 10 pt com `\uN?`, `rhema_keys`, links internos/bíblicos, `--problemas`); ver [11-importador-docx.md](11-importador-docx.md).
+- A1.3: pendente — formato próprio apenas se o `.twm` não bastar, e `kind book` (`.gbk.twm`).
 - E2a: pendente — painel de palavra.
 - E2b: pendente — interlinear.
 - E3: pendente — textos originais e morfologia.

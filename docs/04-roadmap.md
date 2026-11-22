@@ -14,8 +14,8 @@ Marque `[x]` ao concluir. Cada milestone só termina quando **todos** os critér
 
 ## Autoria — A1
 - [x] A1.1 Importador de livros pessoais (`.docx`) — leitura em fluxo, reconhecimento de marcadores, IR e relatório de validação (`rhema-import` e `rhema-cli import docx`); ver [11-importador-docx.md](11-importador-docx.md).
-- [ ] A1.2 Formato de módulo próprio e leitura no app.
-- [ ] A1.3 Exportar para `.twm`.
+- [x] A1.2 Gravador `.twm` de dicionário e comentário a partir da IR (RTF Unicode, links internos/bíblicos, `rhema_keys`, lista `--problemas`); ver [11-importador-docx.md](11-importador-docx.md).
+- [ ] A1.3 Formato próprio apenas se o `.twm` não bastar, e suporte a `kind book` (`.gbk.twm`).
 
 ---
 

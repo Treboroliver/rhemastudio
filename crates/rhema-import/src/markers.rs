@@ -114,6 +114,9 @@ pub fn resolve_bible_ref(raw: &str) -> bool {
     if trimmed.is_empty() {
         return false;
     }
+    if trimmed.to_ascii_lowercase().starts_with("tw://bible.") {
+        return trimmed.contains("id=");
+    }
     let pt = rhema_refs::parse(trimmed, Language::PtBr);
     if !pt.faixas.is_empty() && pt.erros.is_empty() {
         return true;
