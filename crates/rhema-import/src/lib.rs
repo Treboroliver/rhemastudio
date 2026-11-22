@@ -14,4 +14,7 @@ pub use error::{
     MAX_PART_DECOMPRESSED_BYTES, MAX_TABLE_CELLS,
 };
 pub use ir::{Block, Entry, EntryKey, ImportKind, InlineLink, KeyType, Span, SpanStyle};
-pub use report::{StrongGapsReport, StrongRangeStats, SuspiciousTypeReport, ValidationReport};
+pub use report::{
+    truncate_section_title, write_problems_file, ProblemKind, ProblemRecord, StrongGapsReport,
+    StrongRangeStats, SuspiciousTypeReport, ValidationReport,
+};

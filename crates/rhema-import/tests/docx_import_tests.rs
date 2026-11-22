@@ -361,3 +361,57 @@ fn zip_bomb_part_is_rejected_without_unbounded_allocation() {
     let err = import_docx(&path, &opts).expect_err("deve rejeitar bomba de zip");
     assert!(matches!(err, ImportError::ZipBomb { .. }), "{err:?}");
 }
+
+#[test]
+fn problems_list_records_all_problem_types_with_truncated_section_title() {
+    let dir = tempdir().unwrap();
+    let docx_path = dir.path().join("problemas.docx");
+    let out_txt = dir.path().join("problemas.txt");
+
+    let long_title =
+        "Título muito longo de seção inventada que ultrapassa quarenta caracteres facilmente";
+    let body = format!(
+        r#"
+      <w:p><w:pPr><w:pStyle w:val="Ttulo1"/></w:pPr><w:r><w:t>Seção Principal</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Ttulo2"/></w:pPr><w:r><w:t>[[@Headword:Alfa]][[@GreekStrongs:G1]] {long_title}</w:t></w:r></w:p>
+      <w:p><w:r><w:t>{{{{field-on:gloss}}}}campo aberto e [[GreekStrong:G2]] e [[ solto e [[@Bible: Invalido 99.99]].</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Ttulo2"/></w:pPr><w:r><w:t>[[@Headword:Alfa]][[@GreekStrongs:G1]] Repetida</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Ttulo2"/></w:pPr><w:r><w:t>Sem Etiqueta No Nivel</w:t></w:r></w:p>
+    "#
+    );
+    let doc = wrap_doc(&body);
+    write_zip(
+        &docx_path,
+        &[
+            ("word/styles.xml", STYLES_XML.as_bytes(), true),
+            ("word/document.xml", doc.as_bytes(), true),
+        ],
+    );
+
+    let mut opts = ImportOptions::report_only(ImportKind::Dict);
+    opts.collect_problems = true;
+    let res = import_docx(&docx_path, &opts).expect("importar com problemas");
+    rhema_import::write_problems_file(&out_txt, &res.problems).expect("gravar problemas");
+
+    let content = std::fs::read_to_string(&out_txt).expect("ler problemas.txt");
+    let lines: Vec<&str> = content.lines().collect();
+    assert!(lines.iter().any(|l| l.contains("marcador_desbalanceado")));
+    assert!(lines.iter().any(|l| l.contains("campo_sem_fechamento")));
+    assert!(lines.iter().any(|l| l.contains("tipo_suspeito")));
+    assert!(lines.iter().any(|l| l.contains("referencia_nao_resolvida")));
+    assert!(lines.iter().any(|l| l.contains("entrada_duplicada")));
+    assert!(lines.iter().any(|l| l.contains("titulo_sem_etiqueta")));
+    for line in &lines {
+        let cols: Vec<&str> = line.split('\t').collect();
+        assert!(cols.len() >= 3, "linha malformada: {line}");
+        assert!(
+            cols[0].starts_with('P'),
+            "falta número do parágrafo: {line}"
+        );
+        assert!(
+            cols[2].chars().count() <= 40,
+            "título não truncado em 40 chars: {}",
+            cols[2]
+        );
+    }
+}

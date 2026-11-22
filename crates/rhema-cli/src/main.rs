@@ -161,6 +161,10 @@ enum ImportCommands {
         /// Nível de título que inicia entradas (opcional)
         #[arg(long)]
         entry_level: Option<u8>,
+
+        /// Grava lista detalhada de problemas (uma linha por problema) fora do repositório
+        #[arg(long)]
+        problemas: Option<PathBuf>,
     },
 }
 
@@ -443,7 +447,11 @@ fn main() -> Result<()> {
                 kind,
                 report,
                 entry_level,
+                problemas,
             } => {
+                if let Some(ref p) = problemas {
+                    ensure_safe_output_path(p)?;
+                }
                 let import_kind = match kind.as_str() {
                     "dict" => rhema_import::ImportKind::Dict,
                     "comm" => rhema_import::ImportKind::Comm,
@@ -451,7 +459,11 @@ fn main() -> Result<()> {
                 };
                 let mut opts = rhema_import::ImportOptions::report_only(import_kind);
                 opts.entry_level = entry_level;
+                opts.collect_problems = problemas.is_some();
                 let res = rhema_import::import_docx(&file, &opts)?;
+                if let Some(ref p) = problemas {
+                    rhema_import::write_problems_file(p, &res.problems)?;
+                }
                 if report {
                     println!("{}", serde_json::to_string_pretty(&res.report)?);
                 } else {
@@ -461,6 +473,36 @@ fn main() -> Result<()> {
             }
         },
     }
+}
+
+fn ensure_safe_output_path(path: &Path) -> Result<()> {
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let norm = abs
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+    if norm.contains("/modulos-teste/") || norm.ends_with("/modulos-teste") {
+        bail!(
+            "Recusado: nunca gravar em modulos-teste ({})",
+            path.display()
+        );
+    }
+    // Verifica se algum ancestral do destino é o repositório Git (contém .git)
+    let mut cur = abs.parent();
+    while let Some(dir) = cur {
+        if dir.join(".git").exists() {
+            bail!(
+                "Recusado: não é permitido gravar arquivos gerados dentro do repositório ({})",
+                path.display()
+            );
+        }
+        cur = dir.parent();
+    }
+    Ok(())
 }
 
 fn lex_cache_path(path: Option<PathBuf>) -> Result<PathBuf> {

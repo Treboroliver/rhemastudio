@@ -1,8 +1,91 @@
 use std::collections::BTreeMap;
+use std::io::Write;
+use std::path::Path;
 
 use serde::Serialize;
 
+use crate::error::ImportError;
 use crate::ir::ImportKind;
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProblemKind {
+    UnbalancedBracket,
+    UnclosedField,
+    SuspiciousType,
+    UntaggedHeading,
+    UnresolvedRef,
+    DuplicateEntry,
+}
+
+impl ProblemKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::UnbalancedBracket => "marcador_desbalanceado",
+            Self::UnclosedField => "campo_sem_fechamento",
+            Self::SuspiciousType => "tipo_suspeito",
+            Self::UntaggedHeading => "titulo_sem_etiqueta",
+            Self::UnresolvedRef => "referencia_nao_resolvida",
+            Self::DuplicateEntry => "entrada_duplicada",
+        }
+    }
+}
+
+/// Registro de um problema encontrado durante a leitura do `.docx` (para localização no Word).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ProblemRecord {
+    pub paragraph: usize,
+    pub kind: ProblemKind,
+    pub section_title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// Trunca um título de seção em no máximo `max_chars` caracteres, removendo quebras/tabs.
+pub fn truncate_section_title(title: &str, max_chars: usize) -> String {
+    let cleaned: String = title
+        .chars()
+        .map(|c| {
+            if c == '\n' || c == '\r' || c == '\t' {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        return "(sem titulo)".to_string();
+    }
+    trimmed.chars().take(max_chars).collect()
+}
+
+/// Grava a lista de problemas (uma linha por problema) no arquivo indicado.
+pub fn write_problems_file(path: &Path, problems: &[ProblemRecord]) -> Result<(), ImportError> {
+    let mut file = std::fs::File::create(path)?;
+    for item in problems {
+        let title = truncate_section_title(&item.section_title, 40);
+        if let Some(detail) = item.detail.as_deref() {
+            writeln!(
+                file,
+                "P{}\t{}\t{}\t{}",
+                item.paragraph,
+                item.kind.label(),
+                title,
+                detail
+            )?;
+        } else {
+            writeln!(
+                file,
+                "P{}\t{}\t{}",
+                item.paragraph,
+                item.kind.label(),
+                title
+            )?;
+        }
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SuspiciousTypeReport {

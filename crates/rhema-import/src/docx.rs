@@ -15,7 +15,10 @@ use crate::ir::{Block, Entry, EntryKey, ImportKind, KeyType, Span, SpanStyle};
 use crate::markers::{
     parse_paragraph_runs, parse_strong_number, resolve_bible_ref, suggest_known_type,
 };
-use crate::report::{StrongGapsReport, StrongRangeStats, SuspiciousTypeReport, ValidationReport};
+use crate::report::{
+    truncate_section_title, ProblemKind, ProblemRecord, StrongGapsReport, StrongRangeStats,
+    SuspiciousTypeReport, ValidationReport,
+};
 use crate::zip_stream::ZipStream;
 
 #[derive(Debug, Clone)]
@@ -27,6 +30,7 @@ pub struct ImportOptions {
     pub max_table_cells: usize,
     pub max_part_bytes: u64,
     pub collect_entries: bool,
+    pub collect_problems: bool,
 }
 
 impl ImportOptions {
@@ -39,6 +43,7 @@ impl ImportOptions {
             max_table_cells: MAX_TABLE_CELLS,
             max_part_bytes: MAX_PART_DECOMPRESSED_BYTES,
             collect_entries: true,
+            collect_problems: false,
         }
     }
 
@@ -54,6 +59,7 @@ impl ImportOptions {
 pub struct ImportResult {
     pub entries: Vec<Entry>,
     pub report: ValidationReport,
+    pub problems: Vec<ProblemRecord>,
 }
 
 #[derive(Default)]
@@ -220,13 +226,15 @@ struct ImportState<'a> {
     last_docpr_alt: Option<String>,
 
     // Estado da IR e hierarquia
+    paragraph_index: usize,
     heading_stack: Vec<(u8, String)>,
     entry_level: Option<u8>,
-    pre_level_untagged: Vec<u8>,
+    pre_level_untagged: Vec<(u8, usize, String)>,
     next_entry_id: usize,
     current_entry: Option<Entry>,
     current_entry_bytes: usize,
     entries: Vec<Entry>,
+    problems: Vec<ProblemRecord>,
 
     // Contadores do relatório
     entries_count: usize,
@@ -281,6 +289,7 @@ impl<'a> ImportState<'a> {
             table_depth: 0,
             cur_table: TableBuilder::default(),
             last_docpr_alt: None,
+            paragraph_index: 0,
             heading_stack: Vec::new(),
             entry_level: options.entry_level,
             pre_level_untagged: Vec::new(),
@@ -288,6 +297,7 @@ impl<'a> ImportState<'a> {
             current_entry: None,
             current_entry_bytes: 0,
             entries: Vec::new(),
+            problems: Vec::new(),
             entries_count: 0,
             hierarchy_by_level: BTreeMap::new(),
             paragraphs_by_style: BTreeMap::new(),
@@ -378,6 +388,7 @@ impl<'a> ImportState<'a> {
                 self.cur_table.current_row.push(String::new());
             }
             "p" if self.table_depth == 0 => {
+                self.paragraph_index += 1;
                 *self
                     .paragraphs_by_style
                     .entry("(Normal)".to_string())
@@ -533,6 +544,7 @@ impl<'a> ImportState<'a> {
     }
 
     fn process_paragraph(&mut self, p: ParagraphBuilder) -> Result<(), ImportError> {
+        self.paragraph_index += 1;
         let style_key = p.style_id.clone().unwrap_or_else(|| "(Normal)".to_string());
         *self.paragraphs_by_style.entry(style_key).or_default() += 1;
 
@@ -540,7 +552,13 @@ impl<'a> ImportState<'a> {
         let parsed = parse_paragraph_runs(&p.runs, heading_lvl.is_none());
 
         self.unbalanced_brackets += parsed.unbalanced_brackets;
+        for _ in 0..parsed.unbalanced_brackets {
+            self.push_problem(ProblemKind::UnbalancedBracket, None);
+        }
         self.unclosed_fields += parsed.unclosed_fields;
+        for _ in 0..parsed.unclosed_fields {
+            self.push_problem(ProblemKind::UnclosedField, None);
+        }
         self.unmarked_bible_refs += parsed.unmarked_bible_refs;
 
         for (tag, _) in &parsed.tags {
@@ -639,7 +657,7 @@ impl<'a> ImportState<'a> {
         while self.heading_stack.last().is_some_and(|(l, _)| *l >= lvl) {
             self.heading_stack.pop();
         }
-        self.heading_stack.push((lvl, title));
+        self.heading_stack.push((lvl, title.clone()));
 
         match self.options.kind {
             ImportKind::Dict => {
@@ -648,12 +666,18 @@ impl<'a> ImportState<'a> {
                     match self.entry_level {
                         None => {
                             self.entry_level = Some(lvl);
-                            self.untagged_entries_at_level += self
-                                .pre_level_untagged
-                                .iter()
-                                .filter(|&&l| l == lvl)
-                                .count();
-                            self.pre_level_untagged.clear();
+                            let pre = std::mem::take(&mut self.pre_level_untagged);
+                            for (plvl, pnum, ptitle) in pre {
+                                if plvl == lvl {
+                                    self.untagged_entries_at_level += 1;
+                                    self.push_problem_at(
+                                        pnum,
+                                        ProblemKind::UntaggedHeading,
+                                        &ptitle,
+                                        None,
+                                    );
+                                }
+                            }
                         }
                         Some(el) if lvl < el && self.options.entry_level.is_none() => {
                             self.entry_level = Some(lvl);
@@ -677,7 +701,8 @@ impl<'a> ImportState<'a> {
                 } else {
                     match self.entry_level {
                         None => {
-                            self.pre_level_untagged.push(lvl);
+                            self.pre_level_untagged
+                                .push((lvl, self.paragraph_index, title));
                         }
                         Some(el) if lvl < el => {
                             // Título de hierarquia (letra/faixa): fecha entrada anterior.
@@ -687,6 +712,7 @@ impl<'a> ImportState<'a> {
                             // Título no nível de entrada sem etiqueta: fecha anterior e contabiliza.
                             self.flush_current_entry();
                             self.untagged_entries_at_level += 1;
+                            self.push_problem(ProblemKind::UntaggedHeading, None);
                             self.start_entry(lvl, Vec::new());
                         }
                         Some(_) => {
@@ -708,6 +734,18 @@ impl<'a> ImportState<'a> {
                             || self.entry_level.is_some_and(|el| lvl < el))
                     {
                         self.entry_level = Some(lvl);
+                        let pre = std::mem::take(&mut self.pre_level_untagged);
+                        for (plvl, pnum, ptitle) in pre {
+                            if plvl == lvl {
+                                self.untagged_entries_at_level += 1;
+                                self.push_problem_at(
+                                    pnum,
+                                    ProblemKind::UntaggedHeading,
+                                    &ptitle,
+                                    None,
+                                );
+                            }
+                        }
                     }
                     self.flush_current_entry();
                     for k in &tags {
@@ -720,6 +758,7 @@ impl<'a> ImportState<'a> {
                     } else if lvl == el {
                         self.flush_current_entry();
                         self.untagged_entries_at_level += 1;
+                        self.push_problem(ProblemKind::UntaggedHeading, None);
                         self.start_entry(lvl, Vec::new());
                     } else {
                         self.push_block(Block::Paragraph {
@@ -729,7 +768,8 @@ impl<'a> ImportState<'a> {
                         })?;
                     }
                 } else {
-                    self.pre_level_untagged.push(lvl);
+                    self.pre_level_untagged
+                        .push((lvl, self.paragraph_index, title));
                 }
             }
             ImportKind::Book => {
@@ -834,6 +874,7 @@ impl<'a> ImportState<'a> {
                 let norm = (key.value.trim().to_lowercase(), key.lang.clone());
                 if !norm.0.is_empty() && !self.seen_headwords.insert(norm) {
                     self.duplicate_headwords += 1;
+                    self.push_problem(ProblemKind::DuplicateEntry, None);
                 }
             }
             KeyType::HebrewStrongs | KeyType::GreekStrongs => {
@@ -842,11 +883,19 @@ impl<'a> ImportState<'a> {
                         StrongLang::Hebrew => {
                             if !self.seen_hebrew.insert(num) {
                                 self.dup_hebrew += 1;
+                                self.push_problem(
+                                    ProblemKind::DuplicateEntry,
+                                    Some(format!("H{num}")),
+                                );
                             }
                         }
                         StrongLang::Greek => {
                             if !self.seen_greek.insert(num) {
                                 self.dup_greek += 1;
+                                self.push_problem(
+                                    ProblemKind::DuplicateEntry,
+                                    Some(format!("G{num}")),
+                                );
                             }
                         }
                     }
@@ -866,6 +915,10 @@ impl<'a> ImportState<'a> {
                     }
                 });
                 entry.count += 1;
+                self.push_problem(
+                    ProblemKind::SuspiciousType,
+                    Some(format!("{raw}->{suggestion}")),
+                );
             }
         }
     }
@@ -875,14 +928,50 @@ impl<'a> ImportState<'a> {
             self.bible_refs_resolved += 1;
         } else {
             self.bible_refs_unresolved += 1;
-            if self.unresolved_ref_examples.len() < 10 {
-                let trimmed = raw.trim();
-                let short: String = trimmed.chars().take(60).collect();
-                if !self.unresolved_ref_examples.contains(&short) {
-                    self.unresolved_ref_examples.push(short);
-                }
+            let trimmed = raw.trim();
+            let short: String = trimmed.chars().take(60).collect();
+            self.push_problem(ProblemKind::UnresolvedRef, Some(short.clone()));
+            if self.unresolved_ref_examples.len() < 10
+                && !self.unresolved_ref_examples.contains(&short)
+            {
+                self.unresolved_ref_examples.push(short);
             }
         }
+    }
+
+    fn push_problem(&mut self, kind: ProblemKind, detail: Option<String>) {
+        if !self.options.collect_problems {
+            return;
+        }
+        let title = self
+            .heading_stack
+            .last()
+            .map(|(_, t)| t.as_str())
+            .unwrap_or("(início)");
+        self.problems.push(ProblemRecord {
+            paragraph: self.paragraph_index,
+            kind,
+            section_title: truncate_section_title(title, 40),
+            detail,
+        });
+    }
+
+    fn push_problem_at(
+        &mut self,
+        paragraph: usize,
+        kind: ProblemKind,
+        title: &str,
+        detail: Option<String>,
+    ) {
+        if !self.options.collect_problems {
+            return;
+        }
+        self.problems.push(ProblemRecord {
+            paragraph,
+            kind,
+            section_title: truncate_section_title(title, 40),
+            detail,
+        });
     }
 
     fn finish(mut self, elapsed_ms: f64) -> ImportResult {
@@ -936,6 +1025,7 @@ impl<'a> ImportState<'a> {
         ImportResult {
             entries: self.entries,
             report,
+            problems: self.problems,
         }
     }
 }
