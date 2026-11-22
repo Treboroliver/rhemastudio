@@ -235,20 +235,15 @@ impl TwmModule {
         let looks_zlib =
             raw.len() >= 2 && raw[0] == 0x78 && matches!(raw[1], 0x01 | 0x5E | 0x9C | 0xDA);
         if is_compressed && looks_zlib {
-            let mut decoder = ZlibDecoder::new(raw.as_slice());
-            let mut out = Vec::new();
-            decoder.read_to_end(&mut out).map_err(|error| {
-                ModuleError::Corrupted(format!(
-                    "Descompressão zlib falhou para id {topic_id}: {error}"
-                ))
-            })?;
-            return Ok(out);
+            return decompress_zlib_limited(&raw, MAX_TOPIC_DECOMPRESSED_BYTES, topic_id);
         }
         if !is_compressed && looks_zlib {
-            let mut decoder = ZlibDecoder::new(raw.as_slice());
-            let mut out = Vec::new();
-            if decoder.read_to_end(&mut out).is_ok() {
-                return Ok(out);
+            match decompress_zlib_limited(&raw, MAX_TOPIC_DECOMPRESSED_BYTES, topic_id) {
+                Ok(out) => return Ok(out),
+                Err(ModuleError::Corrupted(msg)) if msg.starts_with("content_too_large") => {
+                    return Err(ModuleError::Corrupted(msg));
+                }
+                Err(_) => {}
             }
         }
         Ok(raw)
@@ -936,6 +931,40 @@ fn sql_limit(limit: usize) -> i64 {
     i64::try_from(limit).unwrap_or(i64::MAX)
 }
 
+pub const MAX_TOPIC_DECOMPRESSED_BYTES: usize = 64 * 1024 * 1024;
+
+fn decompress_zlib_limited(
+    raw: &[u8],
+    limit: usize,
+    topic_id: i64,
+) -> Result<Vec<u8>, ModuleError> {
+    let mut decoder = ZlibDecoder::new(raw).take((limit as u64).saturating_add(1));
+    let mut out = Vec::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = decoder.read(&mut buf).map_err(|error| {
+            ModuleError::Corrupted(format!(
+                "Descompressão zlib falhou para id {topic_id}: {error}"
+            ))
+        })?;
+        if n == 0 {
+            break;
+        }
+        if out.len().saturating_add(n) > limit {
+            return Err(ModuleError::Corrupted(format!(
+                "content_too_large: tópico {topic_id} excede o limite de descompressão ({limit} bytes)"
+            )));
+        }
+        let needed = out.len() + n;
+        if needed > out.capacity() {
+            let next_cap = (out.capacity().saturating_mul(2)).max(needed).min(limit);
+            out.reserve_exact(next_cap - out.len());
+        }
+        out.extend_from_slice(&buf[..n]);
+    }
+    Ok(out)
+}
+
 fn corrupted(error: impl std::fmt::Display) -> ModuleError {
     ModuleError::Corrupted(error.to_string())
 }
@@ -1608,5 +1637,77 @@ mod tests {
             crate::plain_text(&direto.content.expect("oculto direto")),
             "Texto oculto"
         );
+    }
+
+    #[test]
+    fn zlib_decompression_rejects_bomb_and_allows_large_legitimate_topic() {
+        use flate2::{write::ZlibEncoder, Compression};
+        use std::io::Write;
+
+        // Bomba sintética: ~65 MB de zeros comprimem para ~65 KB.
+        let mut bomb_enc = ZlibEncoder::new(Vec::new(), Compression::best());
+        let chunk = [b' '; 64 * 1024];
+        let chunks = (MAX_TOPIC_DECOMPRESSED_BYTES / chunk.len()) + 2;
+        for _ in 0..chunks {
+            bomb_enc.write_all(&chunk).expect("write bomb chunk");
+        }
+        let bomb = bomb_enc.finish().expect("finish bomb");
+        assert!(bomb.len() < 128 * 1024, "bomba deveria ter poucos KB");
+
+        // Tópico legítimo grande (2 MB) abaixo do limite de 64 MB.
+        let mut leg_enc = ZlibEncoder::new(Vec::new(), Compression::fast());
+        leg_enc.write_all(br"{\rtf1 ").expect("rtf head");
+        let text_chunk = [b'a'; 64 * 1024];
+        for _ in 0..32 {
+            leg_enc.write_all(&text_chunk).expect("write leg chunk");
+        }
+        leg_enc.write_all(b"}").expect("rtf end");
+        let large_legit = leg_enc.finish().expect("finish legit");
+
+        for compressed_flag in ["1", "0"] {
+            let dir = tempdir().expect("tempdir");
+            let path = dir.path().join(format!("zlib_limit_{compressed_flag}.twm"));
+            let conn = Connection::open(&path).expect("criar sqlite");
+            conn.execute_batch(
+                "CREATE TABLE config (name TEXT, value TEXT);
+                 CREATE TABLE topics (id INTEGER PRIMARY KEY, subject TEXT, content_type TEXT);
+                 CREATE TABLE content (topic_id INTEGER PRIMARY KEY, data BLOB);",
+            )
+            .expect("schema");
+            conn.execute(
+                "INSERT INTO config (name, value) VALUES ('type', '1'), ('compressed', ?1), ('user', '0')",
+                [compressed_flag],
+            )
+            .expect("config");
+            conn.execute(
+                "INSERT INTO topics (id, subject, content_type) VALUES (1, 'BOMBA', 'rtf'), (2, 'GRANDE', 'rtf')",
+                [],
+            )
+            .expect("topics");
+            conn.execute(
+                "INSERT INTO content (topic_id, data) VALUES (1, ?1), (2, ?2)",
+                (&bomb, &large_legit),
+            )
+            .expect("content");
+            drop(conn);
+
+            let src = DictionarySource::open(&path).expect("abrir dicionário");
+            let bomb_entry = src.lookup("BOMBA").expect("lookup bomba").expect("existe");
+            assert!(
+                matches!(
+                    bomb_entry.content,
+                    Err(ModuleError::Corrupted(ref msg)) if msg.contains("content_too_large")
+                ),
+                "esperado content_too_large com compressed={compressed_flag}, obtido: {:?}",
+                bomb_entry.content
+            );
+
+            let legit_entry = src
+                .lookup("GRANDE")
+                .expect("lookup grande")
+                .expect("existe");
+            let nodes = legit_entry.content.expect("tópico legítimo grande ok");
+            assert!(crate::plain_text(&nodes).len() >= 2 * 1024 * 1024);
+        }
     }
 }
