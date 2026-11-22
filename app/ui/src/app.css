@@ -258,6 +258,9 @@ button:focus-visible, select:focus-visible, input:focus-visible {
 .lex-hit:hover, .lex-hit.active { background: var(--card); outline: 1px solid var(--accent); }
 .lex-hit-key { font-weight: 600; }
 .lex-hit-meta, .lex-hit-dice { font-size: 11px; color: var(--muted); }
+.folder-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.folder-item .path-row { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.warning-banner { margin: 8px 0; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--accent); background: var(--card); font-size: 13px; }
 .command-detail { color: var(--muted); font-size: 12px; }
 .command-hint { margin: 10px 2px 0; color: var(--muted); font-size: 12px; }
 

@@ -13,7 +13,9 @@
     error: string | null
     initialStep?: number
     defaultBibleId: string | null
+    warnings?: string[]
     onChooseFolders: () => void
+    onRemoveFolder?: (folder: string) => void
     onScan: () => void
     onFinish: (settings: Pick<AppSettings, 'module_folders' | 'default_bible_id'>) => void
     onCancel?: () => void
@@ -30,7 +32,9 @@
     error,
     initialStep = 1,
     defaultBibleId,
+    warnings = [],
     onChooseFolders,
+    onRemoveFolder,
     onScan,
     onFinish,
     onCancel
@@ -99,11 +103,28 @@
         <div class="folder-block">
           <h2>{t('chosenFolders')}</h2>
           {#each folders as folder}
-            <p class="path-row" title={folder}>{folder}</p>
+            <div class="folder-item">
+              <p class="path-row" title={folder}>{folder}</p>
+              {#if onRemoveFolder}
+                <button
+                  type="button"
+                  class="quiet compact-control"
+                  aria-label={t('removeFolderAria', { folder })}
+                  onclick={() => onRemoveFolder(folder)}
+                >{t('removeFolder')}</button>
+              {/if}
+            </div>
           {/each}
         </div>
       {:else if !defaultFolders.length}
         <p class="body-copy">{t('noFolders')}</p>
+      {/if}
+      {#if warnings.length}
+        <div class="warning-banner" role="status">
+          {#each warnings as warning}
+            <p>{warning}</p>
+          {/each}
+        </div>
       {/if}
       {#if loading}
         <div class="progress-area" aria-live="polite">
@@ -124,6 +145,13 @@
       <p class="body-copy">
         {t('summaryCounts', { bibles: bibles.length, commentaries: commentaries.length, dictionaries: dictionaries.length })}
       </p>
+      {#if warnings.length}
+        <div class="warning-banner" role="status">
+          {#each warnings as warning}
+            <p>{warning}</p>
+          {/each}
+        </div>
+      {/if}
       {#if readyBibles.length}
         <label class="field-label" for="default-bible">{t('chooseDefaultBible')}</label>
         <select id="default-bible" bind:value={selectedBible}>

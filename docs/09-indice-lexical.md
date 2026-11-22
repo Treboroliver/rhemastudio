@@ -77,3 +77,8 @@ As taxas não demonstram equivalência semântica; as ligações preservam prove
 - **Núcleo:** `ReverseIndex` mantido aberto em `LexiconIndex` com índices `idx_wt_word`/`idx_st_strong` e `prepare_cached` reduziu o `p95` de `41,86 ms` para `6,59 ms` (máx. `10,87 ms`). As 3 primeiras sugestões Strong recebem grupos `"ligados a G<n>"` via `links_for_strong`.
 - **Tauri (`lex.rs`):** `lex_index_status`, `lex_index_build` (`spawn_blocking`, evento `lex-index-progress`, sem índice parcial), `lex_search` (consulta ≤200 chars, limite 1–100) e `lex_entry` (RTF/RVF/HTML/texto); reconstrução automática em segundo plano ao abrir e após `library_scan`.
 - **Interface (`Ctrl+K` e aba Léxico):** debounce de 120 ms, prioridade para referências bíblicas, prefixo `l `, sugestões G/H lado a lado com Dice, barra de status (`Índice pronto`/`Construindo %`/`Reconstrução necessária`) e botão `Reconstruir índice`.
+
+## E1b.3 — Abertura por topic_id e títulos limpos
+
+- **Correção:** `INDEX_SCHEMA_VERSION = 2` guarda `topic_id` e aplica `clean_title` (`[[@Headword:X]]`, tags, entidades) na exibição e em `extract_generic`; `lookup_by_id` abre o verbete sem `key.trim()`, e `content.data IS NULL` vira `entry_empty` com mensagens específicas (sem `Tentar novamente` para erros definitivos).
+- **Pastas e verificação:** `library_scan` tolera pastas ausentes (`library:warnings`) e o assistente tem `Remover`. Por `topic_id`, 10 módulos chegam a 200/200 aberturas (`EnciclopédiaTematica` 195/200 e `VINE` 119/200 por `entry_empty`).

@@ -194,6 +194,17 @@ fn entry_error(error: ModuleError) -> ApiError {
             "unsupported_format",
             format!("O formato de conteúdo “{kind}” ainda não é suportado."),
         ),
+        ModuleError::EncryptedModule => ApiError::new(
+            "module_protected",
+            "Módulo protegido: não é lido pelo RhemaStudio.",
+        ),
+        ModuleError::Corrupted(msg) if msg.contains("NULL") || msg.contains("ausente") => {
+            ApiError::new("entry_empty", "Este verbete está vazio neste módulo.")
+        }
+        ModuleError::Corrupted(_) => ApiError::new(
+            "module_corrupted",
+            "Não foi possível decodificar o conteúdo deste verbete.",
+        ),
         other => other.into(),
     }
 }
@@ -289,11 +300,12 @@ pub fn lookup_strong(
     }))
 }
 
-/// Lê uma entrada específica de um dicionário pela chave exata (sem restrição a Strong).
+/// Lê uma entrada específica de um dicionário por `topic_id` ou pela chave exata.
 pub fn lookup_entry(
     cache: &StudyCache,
     module: &ModuleInfo,
     key: &str,
+    topic_id: Option<i64>,
 ) -> Result<LexiconEntryDto, ApiError> {
     if module.kind != ModuleKind::Dictionary {
         return Err(ApiError::new(
@@ -305,7 +317,19 @@ pub fn lookup_entry(
         return Err(err);
     }
     let source = cache.dictionary(module)?;
-    let found = locked(&source).lookup(key)?;
+    let guard = locked(&source);
+    let found = match topic_id {
+        Some(id) => match guard.lookup_by_id(id)? {
+            Some(entry) => Some(entry),
+            None if !key.trim().is_empty() => guard.lookup(key)?,
+            None => None,
+        },
+        None => match guard.lookup(key)? {
+            Some(entry) => Some(entry),
+            None if key.trim() != key => guard.lookup(key.trim())?,
+            None => None,
+        },
+    };
     let Some(entry) = found else {
         return Err(ApiError::new(
             "entry_not_found",
@@ -313,9 +337,15 @@ pub fn lookup_entry(
         ));
     };
     let nodes = entry.content.map_err(entry_error)?;
+    let clean = rhema_lexicon::clean_title(&entry.subject);
+    let title = if clean.is_empty() {
+        entry.subject.trim().to_string()
+    } else {
+        clean
+    };
     Ok(LexiconEntryDto {
-        key: key.to_string(),
-        title: entry.subject,
+        key: title.clone(),
+        title,
         original_word: entry.strong_orig_word,
         module_id: module.id.clone(),
         module_title: module.title.clone(),

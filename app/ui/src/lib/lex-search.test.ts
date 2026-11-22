@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { tick } from 'svelte'
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte'
 import CommandBar from './CommandBar.svelte'
+import FirstRunWizard from './FirstRunWizard.svelte'
 import LexiconTab from './LexiconTab.svelte'
 import ptBR from '../i18n/pt-BR.json'
 import type { LexSearchDto } from './study'
@@ -36,6 +37,7 @@ const sampleLexResult: LexSearchDto = {
           module_title: 'Strong',
           kind: 'strong',
           key: 'G26',
+          topic_id: 26,
           field: 'reverse_index',
           score: 172,
           provenance: 'reverse_index (Dice 0.550)',
@@ -46,6 +48,7 @@ const sampleLexResult: LexSearchDto = {
           module_title: 'Strong',
           kind: 'strong',
           key: 'H160',
+          topic_id: 160,
           field: 'reverse_index',
           score: 159,
           provenance: 'reverse_index (Dice 0.234)',
@@ -65,6 +68,7 @@ const sampleLexResult: LexSearchDto = {
           module_title: 'Louw-Nida',
           kind: 'louw_nida',
           key: '25.43',
+          topic_id: 42,
           field: 'key',
           score: 1000,
           provenance: null,
@@ -207,7 +211,65 @@ describe('Busca léxica na CommandBar e na aba Léxico', () => {
     await fireEvent.keyDown(searchInput, { key: 'Enter' })
     await vi.advanceTimersByTimeAsync(10)
 
-    expect(loadEntryFn).toHaveBeenCalledWith('louw.dct.twm', '25.43')
+    expect(loadEntryFn).toHaveBeenCalledWith('louw.dct.twm', '25.43', 42)
     expect(screen.getByText('Texto sintetico')).toBeTruthy()
+  })
+
+  it('exibe mensagens de erro específicas sem botão Tentar novamente quando não faz sentido', async () => {
+    const loadEntryFn = vi
+      .fn()
+      .mockRejectedValueOnce({ code: 'entry_empty', message: 'vazio' })
+      .mockRejectedValueOnce({ code: 'module_not_found', message: 'ausente' })
+
+    const { rerender } = render(LexiconTab, {
+      t,
+      request: null,
+      entryRequest: { moduleId: 'm1', key: 'A', topicId: 1, seq: 1 },
+      onVerse: vi.fn(),
+      onManageFolders: vi.fn(),
+      loadEntryFn
+    })
+    await vi.advanceTimersByTimeAsync(10)
+    expect(screen.getByText('Este verbete está vazio neste módulo.')).toBeTruthy()
+    expect(screen.queryByText('Tentar novamente')).toBeNull()
+
+    await rerender({
+      t,
+      request: null,
+      entryRequest: { moduleId: 'm2', key: 'B', topicId: 2, seq: 2 },
+      onVerse: vi.fn(),
+      onManageFolders: vi.fn(),
+      loadEntryFn
+    })
+    await vi.advanceTimersByTimeAsync(10)
+    expect(screen.getByText('O módulo selecionado não está disponível na biblioteca.')).toBeTruthy()
+    expect(screen.queryByText('Tentar novamente')).toBeNull()
+  })
+
+  it('permite remover pastas e exibe aviso de pasta inacessível no assistente', async () => {
+    const onRemoveFolder = vi.fn()
+    render(FirstRunWizard, {
+      t,
+      modules: [],
+      folders: ['C:\\ModulosA', 'C:\\ModulosB'],
+      defaultFolders: [],
+      progress: 0,
+      scanCompleted: false,
+      loading: false,
+      error: null,
+      initialStep: 2,
+      defaultBibleId: null,
+      warnings: ['Pasta inacessível ignorada: C:\\ModulosB'],
+      onChooseFolders: vi.fn(),
+      onRemoveFolder,
+      onScan: vi.fn(),
+      onFinish: vi.fn()
+    })
+
+    expect(screen.getByText('Pasta inacessível ignorada: C:\\ModulosB')).toBeTruthy()
+    const removeButtons = screen.getAllByText('Remover')
+    expect(removeButtons).toHaveLength(2)
+    await fireEvent.click(removeButtons[1])
+    expect(onRemoveFolder).toHaveBeenCalledWith('C:\\ModulosB')
   })
 })

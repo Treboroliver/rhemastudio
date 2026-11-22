@@ -283,21 +283,124 @@ pub fn extract_ditnt(key: &str, text: &str) -> DitntEntry {
     }
 }
 
-pub fn extract_generic(title: &str) -> String {
-    let mut plain = String::new();
+/// Limpa marcações de título (`[[@Headword:X]]`, tags HTML e entidades) sem alterar o módulo.
+pub fn clean_title(title: &str) -> String {
+    let mut no_headword = String::with_capacity(title.len());
+    let mut rest = title;
+    while let Some(start) = rest.find("[[@") {
+        no_headword.push_str(&rest[..start]);
+        let after = &rest[start + 3..];
+        if let Some(end) = after.find("]]") {
+            rest = &after[end + 2..];
+        } else {
+            no_headword.push_str(&rest[start..]);
+            rest = "";
+            break;
+        }
+    }
+    no_headword.push_str(rest);
+
+    let mut no_tags = String::with_capacity(no_headword.len());
     let mut in_tag = false;
-    for ch in title.chars() {
+    for ch in no_headword.chars() {
         match ch {
             '<' => in_tag = true,
             '>' if in_tag => {
                 in_tag = false;
-                plain.push(' ');
+                no_tags.push(' ');
             }
-            _ if !in_tag => plain.push(ch),
+            _ if !in_tag => no_tags.push(ch),
             _ => {}
         }
     }
-    fold_latin(&plain.split_whitespace().collect::<Vec<_>>().join(" "))
+
+    let decoded = decode_title_entities(&no_tags);
+    let cleaned = decoded.split_whitespace().collect::<Vec<_>>().join(" ");
+    if cleaned.is_empty() {
+        if let Some(pos) = title.find("[[@Headword:") {
+            let after = &title[pos + 11..];
+            if let Some(end) = after.find("]]") {
+                return after[..end].trim().to_string();
+            }
+        }
+    }
+    cleaned
+}
+
+fn decode_title_entities(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    let bytes = s.as_bytes();
+    while i < bytes.len() {
+        if bytes[i] == b'&' {
+            if let Some(semi) = s[i + 1..s.len().min(i + 16)].find(';') {
+                let body = &s[i + 1..i + 1 + semi];
+                let ch = if let Some(hex) =
+                    body.strip_prefix("#x").or_else(|| body.strip_prefix("#X"))
+                {
+                    u32::from_str_radix(hex, 16)
+                        .ok()
+                        .filter(|&c| c > 0)
+                        .and_then(char::from_u32)
+                } else if let Some(dec) = body.strip_prefix('#') {
+                    dec.parse::<u32>()
+                        .ok()
+                        .filter(|&c| c > 0)
+                        .and_then(char::from_u32)
+                } else {
+                    match body {
+                        "amp" => Some('&'),
+                        "lt" => Some('<'),
+                        "gt" => Some('>'),
+                        "quot" => Some('"'),
+                        "apos" => Some('\''),
+                        "nbsp" => Some(' '),
+                        "aacute" => Some('á'),
+                        "Aacute" => Some('Á'),
+                        "agrave" => Some('à'),
+                        "Agrave" => Some('À'),
+                        "acirc" => Some('â'),
+                        "Acirc" => Some('Â'),
+                        "atilde" => Some('ã'),
+                        "Atilde" => Some('Ã'),
+                        "eacute" => Some('é'),
+                        "Eacute" => Some('É'),
+                        "ecirc" => Some('ê'),
+                        "Ecirc" => Some('Ê'),
+                        "iacute" => Some('í'),
+                        "Iacute" => Some('Í'),
+                        "oacute" => Some('ó'),
+                        "Oacute" => Some('Ó'),
+                        "ocirc" => Some('ô'),
+                        "Ocirc" => Some('Ô'),
+                        "otilde" => Some('õ'),
+                        "Otilde" => Some('Õ'),
+                        "uacute" => Some('ú'),
+                        "Uacute" => Some('Ú'),
+                        "ccedil" => Some('ç'),
+                        "Ccedil" => Some('Ç'),
+                        _ => None,
+                    }
+                };
+                if let Some(ch) = ch {
+                    out.push(ch);
+                    i += semi + 2;
+                    continue;
+                }
+            }
+        }
+        if let Some(ch) = s[i..].chars().next() {
+            out.push(ch);
+            i += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+    out
+}
+
+pub fn extract_generic(title: &str) -> String {
+    fold_latin(&clean_title(title))
 }
 
 pub(crate) fn normalized_greek(lemma: &str) -> String {
@@ -378,6 +481,9 @@ mod tests {
         assert_eq!(nt.lemmas, ["λόγος", "πίστις"]);
         assert_eq!(nt.total_count, 2);
         assert_eq!(extract_generic("<b>Coração</b>"), "coracao");
+        assert_eq!(clean_title("[[@Headword:CREDO]] CREDO"), "CREDO");
+        assert_eq!(clean_title("<b>F&eacute;</b> &amp; &#233;"), "Fé & é");
+        assert_eq!(extract_generic("[[@Headword:AMOR]] AMOR "), "amor");
         assert!(extract_strong("", "", "").is_none());
         assert!(extract_ditat("?", "").is_none());
     }

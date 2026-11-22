@@ -354,9 +354,6 @@ fn library_scan(
         Some(paths) if !paths.is_empty() => paths,
         _ => current_folders(&state).map_err(|error| error.to_string())?,
     };
-    for folder in &folders {
-        validate_folder(folder).map_err(|error| error.to_string())?;
-    }
     let result = state
         .library
         .scan(&folders, |seen| {
@@ -365,6 +362,9 @@ fn library_scan(
             }
         })
         .map_err(|error| CommandError::Library(error.to_string()).to_string())?;
+    if !result.warnings.is_empty() {
+        let _ = app.emit("library:warnings", &result.warnings);
+    }
     let modules = result.modules;
     *state
         .catalog
@@ -521,13 +521,16 @@ async fn lex_search(
 async fn lex_entry(
     module_id: String,
     key: String,
+    topic_id: Option<i64>,
     state: State<'_, AppState>,
 ) -> Result<study::LexiconEntryDto, ApiError> {
     let (catalog, _) = study_snapshot(&state)?;
     let cache = Arc::clone(&state.study);
-    tauri::async_runtime::spawn_blocking(move || lex::entry(&cache, &catalog, &module_id, &key))
-        .await
-        .map_err(|error| ApiError::internal(error.to_string()))?
+    tauri::async_runtime::spawn_blocking(move || {
+        lex::entry(&cache, &catalog, &module_id, &key, topic_id)
+    })
+    .await
+    .map_err(|error| ApiError::internal(error.to_string()))?
 }
 
 #[tauri::command]

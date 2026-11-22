@@ -17,3 +17,4 @@
 - Busca lexical sem stemming: "amor" não encontra "amores" e "amores" não encontra "amor" (apenas correspondência sem acentos).
 - Decodificador HTML (`convert_html`) extrai texto e parágrafos sem preservar formatação inline (negrito, itálico, links).
 - Índice reverso palavra → Strong tokeniza apenas palavras latinas; Bíblias originais com Strong (`tr(gr).nt`, `tra.nt`, `tanakh+.ot`) não entram no índice reverso.
+- Alguns módulos têm entradas com `content.data IS NULL` no próprio arquivo (`VINE`, `EnciclopédiaTematica`, `DChamplin`, `NDT`), exibidas como verbete vazio (`entry_empty`).

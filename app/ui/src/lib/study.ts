@@ -75,6 +75,7 @@ export interface LexSearchHitDto {
   module_title: string
   kind: string
   key: string
+  topic_id: number | null
   field: string
   score: number
   provenance: string | null
@@ -102,14 +103,15 @@ export interface LexSearchDto {
 export interface LexEntryRequest {
   moduleId: string
   key: string
+  topicId?: number | null
   seq: number
 }
 
 export const lookupStrong = (strongId: string) =>
   invoke<LexiconEntryDto>('lookup_strong', { strongId })
 
-export const lexEntry = (moduleId: string, key: string) =>
-  invoke<LexiconEntryDto>('lex_entry', { moduleId, key })
+export const lexEntry = (moduleId: string, key: string, topicId?: number | null) =>
+  invoke<LexiconEntryDto>('lex_entry', { moduleId, key, topicId: topicId ?? null })
 
 export const lexSearch = (query: string, limit?: number) =>
   invoke<LexSearchDto>('lex_search', { query, limit })

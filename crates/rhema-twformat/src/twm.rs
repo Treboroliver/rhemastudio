@@ -463,6 +463,22 @@ impl DictionarySource {
         query.map(|entry| self.load_entry(entry)).transpose()
     }
 
+    /// Busca uma entrada de dicionário diretamente pelo `topic_id` estável.
+    pub fn lookup_by_id(&self, topic_id: i64) -> Result<Option<DictionaryEntry>, ModuleError> {
+        let query = self
+            .module
+            .connection
+            .query_row(
+                "SELECT id, subject, strong_orig_word, content_type FROM topics \
+                 WHERE id = ?1 LIMIT 1",
+                [topic_id],
+                read_dictionary_ref,
+            )
+            .optional()
+            .map_err(corrupted)?;
+        query.map(|entry| self.load_entry(entry)).transpose()
+    }
+
     pub fn prefix_search(
         &self,
         prefix: &str,

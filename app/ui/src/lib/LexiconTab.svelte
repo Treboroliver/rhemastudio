@@ -30,7 +30,7 @@
     searchFn?: (query: string, limit?: number) => Promise<LexSearchDto>
     statusFn?: () => Promise<LexIndexStatusDto>
     buildFn?: () => Promise<LexIndexStatusDto>
-    loadEntryFn?: (moduleId: string, key: string) => Promise<LexiconEntryDto>
+    loadEntryFn?: (moduleId: string, key: string, topicId?: number | null) => Promise<LexiconEntryDto>
     searchDelay?: number
   }
 
@@ -38,6 +38,7 @@
     key: string
     choices: string[]
     moduleId?: string
+    topicId?: number | null
   }
 
   const HISTORY_LIMIT = 50
@@ -133,13 +134,13 @@
     }
   }
 
-  async function load(key: string, moduleId?: string) {
+  async function load(key: string, moduleId?: string, topicId?: number | null) {
     const id = ++sequence
     loading = true
     entry = null
     errorCode = null
     try {
-      const found = moduleId ? await loadEntryFn(moduleId, key) : await lookupStrong(key)
+      const found = moduleId ? await loadEntryFn(moduleId, key, topicId) : await lookupStrong(key)
       if (id !== sequence) return
       entry = found
     } catch (cause) {
@@ -150,13 +151,13 @@
     }
   }
 
-  function visit(key: string, choices: string[], moduleId?: string) {
-    if (current?.key === key && current?.moduleId === moduleId) {
-      visits = [...visits.slice(0, -1), { key, choices, moduleId }]
-      return void load(key, moduleId)
+  function visit(key: string, choices: string[], moduleId?: string, topicId?: number | null) {
+    if (current?.key === key && current?.moduleId === moduleId && current?.topicId === topicId) {
+      visits = [...visits.slice(0, -1), { key, choices, moduleId, topicId }]
+      return void load(key, moduleId, topicId)
     }
-    visits = [...visits, { key, choices, moduleId }].slice(-HISTORY_LIMIT)
-    void load(key, moduleId)
+    visits = [...visits, { key, choices, moduleId, topicId }].slice(-HISTORY_LIMIT)
+    void load(key, moduleId, topicId)
   }
 
   function choose(key: string) {
@@ -169,7 +170,7 @@
     if (visits.length < 2) return
     visits = visits.slice(0, -1)
     const prev = visits[visits.length - 1]
-    void load(prev.key, prev.moduleId)
+    void load(prev.key, prev.moduleId, prev.topicId)
   }
 
   function openHit(hit: LexSearchHitDto) {
@@ -177,7 +178,7 @@
     if (hit.kind === 'strong' || /^[GH]\d+$/i.test(hit.key)) {
       visit(hit.key, [hit.key])
     } else {
-      visit(hit.key, [hit.key], hit.module_id)
+      visit(hit.key, [hit.key], hit.module_id, hit.topic_id)
     }
   }
 
@@ -253,7 +254,7 @@
   $effect(() => {
     const incoming = entryRequest
     if (!incoming) return
-    untrack(() => visit(incoming.key, [incoming.key], incoming.moduleId))
+    untrack(() => visit(incoming.key, [incoming.key], incoming.moduleId, incoming.topicId))
   })
 
   onMount(() => {
@@ -465,13 +466,19 @@
         <button type="button" class="primary" onclick={onManageFolders}>{t('manageFolders')}</button>
       </div>
     {:else if errorCode === 'entry_not_found'}
-      <p class="panel-empty" role="status">{t('lexiconNotFound')}</p>
+      <p class="panel-empty" role="status">{current.moduleId ? t('lexiconEntryNotFound') : t('lexiconNotFound')}</p>
+    {:else if errorCode === 'entry_empty'}
+      <p class="panel-empty" role="status">{t('lexiconEntryEmpty')}</p>
     {:else if errorCode === 'unsupported_format'}
       <p class="panel-empty" role="status">{t('lexiconUnsupported')}</p>
+    {:else if errorCode === 'module_not_found'}
+      <p class="panel-empty" role="status">{t('lexiconModuleMissing')}</p>
+    {:else if errorCode === 'module_protected'}
+      <p class="panel-empty" role="status">{t('lexiconModuleProtected')}</p>
     {:else if errorCode}
       <div class="panel-empty" role="alert">
         <p>{t('lexiconError')}</p>
-        <button type="button" class="quiet" onclick={() => current && load(current.key, current.moduleId)}>{t('retry')}</button>
+        <button type="button" class="quiet" onclick={() => current && load(current.key, current.moduleId, current.topicId)}>{t('retry')}</button>
       </div>
     {/if}
   {/if}

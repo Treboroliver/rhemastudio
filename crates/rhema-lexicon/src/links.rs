@@ -290,6 +290,7 @@ fn open_cache(path: &Path, create: bool) -> Result<Connection, LexiconError> {
 }
 
 pub(crate) struct Row {
+    pub(crate) topic_id: i64,
     pub(crate) key: String,
     pub(crate) original: String,
     pub(crate) kind: String,
@@ -321,16 +322,17 @@ where
     } else {
         "(SELECT value FROM config WHERE lower(trim(name))='content.type' LIMIT 1)"
     };
-    let sql = format!("SELECT t.subject,{orig},{kind},CAST(c.data AS BLOB) FROM topics t LEFT JOIN content c ON c.topic_id=t.id ORDER BY t.id");
+    let sql = format!("SELECT t.id,t.subject,{orig},{kind},CAST(c.data AS BLOB) FROM topics t LEFT JOIN content c ON c.topic_id=t.id ORDER BY t.id");
     let mut stmt = db.prepare(&sql)?;
     let mut rows = stmt.query([])?;
     let mut count = 0;
     while let Some(row) = rows.next()? {
         visit(Row {
-            key: row.get::<_, Option<String>>(0)?.unwrap_or_default(),
-            original: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-            kind: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-            bytes: row.get(3)?,
+            topic_id: row.get(0)?,
+            key: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            original: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            kind: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+            bytes: row.get(4)?,
         })?;
         count += 1;
     }

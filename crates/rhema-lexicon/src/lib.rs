@@ -6,8 +6,8 @@ mod reverse;
 mod translit;
 
 pub use extract::{
-    extract_ditat, extract_ditnt, extract_generic, extract_louw_nida, extract_strong, DitatEntry,
-    DitatSubentry, DitntEntry, LouwNidaEntry, StrongEntry,
+    clean_title, extract_ditat, extract_ditnt, extract_generic, extract_louw_nida, extract_strong,
+    DitatEntry, DitatSubentry, DitntEntry, LouwNidaEntry, StrongEntry,
 };
 pub use index::{
     bench_queries, build_index, default_data_dir, default_index_dir, BuildProgress, ChangeKind,

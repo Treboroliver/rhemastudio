@@ -23,13 +23,13 @@ use walkdir::WalkDir;
 use crate::links::{classify, decoded, entries, read_db, Kind, Row};
 use crate::translit::{translit_greek, translit_norm};
 use crate::{
-    detect_script, extract_ditat, extract_ditnt, extract_generic, extract_louw_nida,
+    clean_title, detect_script, extract_ditat, extract_ditnt, extract_generic, extract_louw_nida,
     extract_strong, fold_greek, fold_hebrew, fold_latin, links_for_strong, parse_query,
     LexiconError, Query, Script,
 };
 
 /// Versão do esquema do índice; mudança exige reconstrução.
-pub const INDEX_SCHEMA_VERSION: u32 = 1;
+pub const INDEX_SCHEMA_VERSION: u32 = 2;
 const METADATA_FILE: &str = "rhema-index.json";
 const POINTER_FILE: &str = "CURRENT";
 const GENERATION_PREFIX: &str = "gen-";
@@ -244,6 +244,7 @@ pub struct SearchHit {
     pub module_id: String,
     pub kind: LexKind,
     pub key: String,
+    pub topic_id: Option<i64>,
     pub field: MatchField,
     pub score: f32,
     pub interpretation: String,
@@ -271,6 +272,7 @@ struct Fields {
     module_id: Field,
     kind: Field,
     key: Field,
+    topic_id: Field,
     key_norm: Field,
     lemma: Field,
     lemma_norm: Field,
@@ -296,6 +298,7 @@ fn schema() -> Schema {
     for name in &FIELD_NAMES[..3] {
         builder.add_text_field(name, STRING | STORED);
     }
+    builder.add_i64_field("topic_id", STORED);
     for name in &FIELD_NAMES[3..8] {
         builder.add_text_field(name, STRING);
     }
@@ -318,6 +321,7 @@ fn fields(schema: &Schema) -> Result<Fields, LexiconError> {
         module_id: get("module_id")?,
         kind: get("kind")?,
         key: get("key")?,
+        topic_id: get("topic_id")?,
         key_norm: get("key_norm")?,
         lemma: get("lemma")?,
         lemma_norm: get("lemma_norm")?,
@@ -542,7 +546,16 @@ fn entry_document(f: &Fields, module: &Found, row: &Row, text: &str) -> TantivyD
     let mut doc = TantivyDocument::default();
     doc.add_text(f.module_id, &module.id);
     doc.add_text(f.kind, module.kind.as_str());
-    doc.add_text(f.key, &row.key);
+    let display_key = clean_title(&row.key);
+    doc.add_text(
+        f.key,
+        if display_key.is_empty() {
+            row.key.trim()
+        } else {
+            &display_key
+        },
+    );
+    doc.add_i64(f.topic_id, row.topic_id);
     match module.kind {
         LexKind::Strong => {
             if let Some(entry) = extract_strong(&row.key, &row.original, text) {
@@ -1214,6 +1227,7 @@ impl LexiconIndex {
             let (field, interpretation, provenance) = &meta[i];
             let module_id = get(self.f.module_id);
             let kind = LexKind::parse(&get(self.f.kind));
+            let topic_id = doc.get_first(self.f.topic_id).and_then(|v| v.as_i64());
             hits.push((
                 module_id.clone(),
                 kind,
@@ -1221,6 +1235,7 @@ impl LexiconIndex {
                     module_id,
                     kind,
                     key: get(self.f.key),
+                    topic_id,
                     field: *field,
                     score,
                     interpretation: interpretation.clone(),
@@ -1325,10 +1340,12 @@ impl LexiconIndex {
                     .and_then(|v| v.as_str())
                     .unwrap_or(&sug.strong)
                     .to_string();
+                let topic_id = doc.get_first(self.f.topic_id).and_then(|v| v.as_i64());
                 hits.push(SearchHit {
                     module_id,
                     kind: LexKind::Strong,
                     key,
+                    topic_id,
                     field: MatchField::ReverseIndex,
                     score: MatchField::ReverseIndex.base() + (sug.dice as f32) * 40.0,
                     interpretation: format!("latino:{word}"),
@@ -1394,7 +1411,8 @@ impl LexiconIndex {
             hits.push(SearchHit {
                 module_id: module_id.clone(),
                 kind,
-                key: link.key,
+                key: clean_title(&link.key),
+                topic_id: None,
                 field: MatchField::Link,
                 score: MatchField::ReverseIndex.base() - 10.0,
                 interpretation: format!("strong:{strong}"),

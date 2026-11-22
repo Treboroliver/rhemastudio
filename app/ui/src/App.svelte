@@ -81,6 +81,7 @@
   let scanning = $state(false)
   let scanCompleted = $state(false)
   let error = $state<string | null>(null)
+  let scanWarnings = $state<string[]>([])
   let showSetup = $state(false)
   let setupStep = $state(1)
   let setupIsFirstRun = $state(true)
@@ -208,10 +209,15 @@
     progress = 0
     scanCompleted = false
     error = null
+    scanWarnings = []
     let unlisten: UnlistenFn | undefined
+    let unlistenWarn: UnlistenFn | undefined
     try {
       unlisten = await listen<number>('library:progress', (event) => {
         progress = event.payload
+      })
+      unlistenWarn = await listen<{ path: string; message: string }[]>('library:warnings', (event) => {
+        scanWarnings = event.payload.map((w) => t('folderIgnoredWarning', { path: w.path }))
       })
       const scanned = await invoke<ModuleInfo[]>('library_scan', {
         paths: pendingFolders.length ? pendingFolders : null
@@ -231,6 +237,7 @@
       error = errorMessage(cause, t('scanFailed'))
     } finally {
       unlisten?.()
+      unlistenWarn?.()
       scanning = false
     }
   }
@@ -485,7 +492,7 @@
     if (hit.kind === 'strong' || /^[GH]\d+$/i.test(hit.key)) {
       strongRequest = { ids: [hit.key], seq: ++strongSequence }
     } else {
-      lexEntryRequest = { moduleId: hit.module_id, key: hit.key, seq: ++lexEntrySequence }
+      lexEntryRequest = { moduleId: hit.module_id, key: hit.key, topicId: hit.topic_id, seq: ++lexEntrySequence }
     }
     void tick().then(() => setTimeout(() => studyPanel?.focusContent(), 0))
   }
@@ -737,7 +744,11 @@
     {error}
     initialStep={setupStep}
     defaultBibleId={activeBibleId}
+    warnings={scanWarnings}
     onChooseFolders={chooseFolders}
+    onRemoveFolder={(folder) => {
+      pendingFolders = pendingFolders.filter((f) => f !== folder)
+    }}
     onScan={scanLibrary}
     onFinish={completeSetup}
     onCancel={setupIsFirstRun ? undefined : () => (showSetup = false)}

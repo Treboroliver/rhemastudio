@@ -520,3 +520,64 @@ fn indexes_html_module_and_searches_body() -> Result<(), LexiconError> {
     assert_eq!(index.search("segredo", 10, &none)?.total, 0);
     Ok(())
 }
+
+#[test]
+fn cleans_titles_and_preserves_distinct_topic_ids_for_duplicates() -> Result<(), LexiconError> {
+    let dir = tempfile::tempdir()?;
+    let modules = dir.path().join("modulos");
+    fs::create_dir(&modules)?;
+    let path = modules.join("comum.dct.twm");
+    let db = Connection::open(&path)?;
+    db.execute_batch(
+        "CREATE TABLE config(name TEXT, value TEXT);
+         CREATE TABLE topics(id INTEGER,subject TEXT,strong_orig_word TEXT,content_type TEXT);
+         CREATE TABLE content(topic_id INTEGER,data BLOB);",
+    )?;
+    db.execute("INSERT INTO config VALUES ('content.type', 'html')", [])?;
+    db.execute(
+        "INSERT INTO topics VALUES (10,'[[@Headword:CREDO]] CREDO ','',NULL)",
+        [],
+    )?;
+    db.execute(
+        "INSERT INTO content VALUES (10,?1)",
+        params![b"<p>Primeiro</p>".as_slice()],
+    )?;
+    db.execute(
+        "INSERT INTO topics VALUES (20,'<b>F&eacute;</b>','',NULL)",
+        [],
+    )?;
+    db.execute(
+        "INSERT INTO content VALUES (20,?1)",
+        params![b"<p>Segundo</p>".as_slice()],
+    )?;
+    db.execute("INSERT INTO topics VALUES (30,'Duplicado','',NULL)", [])?;
+    db.execute("INSERT INTO content VALUES (30,NULL)", [])?;
+    db.execute("INSERT INTO topics VALUES (31,'Duplicado','',NULL)", [])?;
+    db.execute(
+        "INSERT INTO content VALUES (31,?1)",
+        params![b"<p>Valido</p>".as_slice()],
+    )?;
+    drop(db);
+
+    let index_dir = dir.path().join("indice");
+    build_index(&index_dir, std::slice::from_ref(&modules), &mut |_| {})?;
+    let index = LexiconIndex::open(&index_dir)?;
+    let none = SearchFilters::default();
+
+    let credo = index.search("credo", 10, &none)?;
+    assert_eq!(credo.groups[0].hits[0].key, "CREDO");
+    assert_eq!(credo.groups[0].hits[0].topic_id, Some(10));
+
+    let fe = index.search("fe", 10, &none)?;
+    assert_eq!(fe.groups[0].hits[0].key, "Fé");
+    assert_eq!(fe.groups[0].hits[0].topic_id, Some(20));
+
+    let dup = index.search("duplicado", 10, &none)?;
+    let ids: Vec<_> = dup.groups[0]
+        .hits
+        .iter()
+        .filter_map(|h| h.topic_id)
+        .collect();
+    assert_eq!(ids, vec![30, 31]);
+    Ok(())
+}

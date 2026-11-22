@@ -118,6 +118,7 @@ pub struct LexSearchHitDto {
     pub module_title: String,
     pub kind: String,
     pub key: String,
+    pub topic_id: Option<i64>,
     pub field: String,
     pub score: f32,
     pub provenance: Option<String>,
@@ -509,6 +510,7 @@ fn map_search_results(query: &str, catalog: &[ModuleInfo], results: SearchResult
                         module_id: h.module_id,
                         kind: kind_label(h.kind).into(),
                         key: h.key,
+                        topic_id: h.topic_id,
                         field: h.field.as_str().into(),
                         score: h.score,
                         provenance: h.provenance,
@@ -557,10 +559,13 @@ pub fn entry(
     catalog: &[ModuleInfo],
     module_id: &str,
     key: &str,
+    topic_id: Option<i64>,
 ) -> Result<LexiconEntryDto, ApiError> {
     let module_id = module_id.trim();
-    let key = key.trim();
-    if module_id.is_empty() || key.is_empty() || key.chars().count() > MAX_QUERY_CHARS {
+    if module_id.is_empty()
+        || (topic_id.is_none() && key.trim().is_empty())
+        || key.chars().count() > MAX_QUERY_CHARS
+    {
         return Err(ApiError::new(
             "invalid_argument",
             "Identificador ou chave inválida.",
@@ -576,7 +581,7 @@ pub fn entry(
                     .is_some_and(|name| name == module_id)
         })
         .ok_or_else(|| ApiError::new("module_not_found", "Módulo não encontrado na biblioteca."))?;
-    study::lookup_entry(cache, module, key)
+    study::lookup_entry(cache, module, key, topic_id)
 }
 
 #[cfg(test)]
@@ -640,14 +645,29 @@ mod tests {
         assert_eq!(res.groups[0].hits[0].key, "G25");
 
         let cache = StudyCache::new(4);
-        let loaded = entry(&cache, &catalog, &res.groups[0].hits[0].module_id, "G25").unwrap();
+        let hit = &res.groups[0].hits[0];
+        let loaded = entry(&cache, &catalog, &hit.module_id, &hit.key, hit.topic_id).unwrap();
         assert_eq!(loaded.module_id, "id-dict");
         assert!(!loaded.degraded);
         assert!(!loaded.nodes.is_empty());
 
         assert_eq!(
-            entry(&cache, &catalog, "id-prot", "G25").unwrap_err().code,
+            entry(&cache, &catalog, "id-prot", "G25", None)
+                .unwrap_err()
+                .code,
             "module_protected"
+        );
+        assert_eq!(
+            entry(&cache, &catalog, "inexistente", "G25", None)
+                .unwrap_err()
+                .code,
+            "module_not_found"
+        );
+        assert_eq!(
+            entry(&cache, &catalog, "id-dict", "INEXISTENTE", None)
+                .unwrap_err()
+                .code,
+            "entry_not_found"
         );
     }
 
