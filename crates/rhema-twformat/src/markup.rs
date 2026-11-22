@@ -3,6 +3,10 @@ use rhema_core::{Book, Node, StrongLang, VerseRange, VerseRef};
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ContainerKind {
     Italic,
+    Bold,
+    Superscript,
+    Subscript,
+    Transparent,
     WordsOfJesus,
     OtQuote,
     Heading(u8),
@@ -109,12 +113,12 @@ pub fn tokenize_markup(input: &str) -> Vec<Node> {
                 {
                     while stack.len() > index + 1 {
                         if let Some(frame) = stack.pop() {
-                            append_node(&mut root, &mut stack, build_node(frame));
+                            append_frame(&mut root, &mut stack, frame);
                         }
                     }
                     if let Some(mut frame) = stack.pop() {
                         frame.raw_close = raw_tag.to_string();
-                        append_node(&mut root, &mut stack, build_node(frame));
+                        append_frame(&mut root, &mut stack, frame);
                     }
                 }
             }
@@ -177,7 +181,7 @@ pub fn tokenize_markup(input: &str) -> Vec<Node> {
                 {
                     while stack.len() > index + 1 {
                         if let Some(frame) = stack.pop() {
-                            append_node(&mut root, &mut stack, build_node(frame));
+                            append_frame(&mut root, &mut stack, frame);
                         }
                     }
                     if let Some(mut frame) = stack.pop() {
@@ -191,7 +195,7 @@ pub fn tokenize_markup(input: &str) -> Vec<Node> {
     }
 
     while let Some(frame) = stack.pop() {
-        append_node(&mut root, &mut stack, build_node(frame));
+        append_frame(&mut root, &mut stack, frame);
     }
     root
 }
@@ -206,10 +210,18 @@ fn parse_token(contents: &str) -> Token {
         return Token::Close { kind, name };
     }
     if let Some(closing) = contents.strip_prefix('/') {
-        if closing == "i" {
+        let html_close = match closing {
+            "i" => Some((ContainerKind::Italic, "i")),
+            "b" => Some((ContainerKind::Bold, "b")),
+            "sup" => Some((ContainerKind::Superscript, "sup")),
+            "sub" => Some((ContainerKind::Subscript, "sub")),
+            c if c.eq_ignore_ascii_case("font") => Some((ContainerKind::Transparent, "font")),
+            _ => None,
+        };
+        if let Some((kind, name)) = html_close {
             return Token::Close {
-                kind: FrameKind::Container(ContainerKind::Italic),
-                name: "i".to_string(),
+                kind: FrameKind::Container(kind),
+                name: name.to_string(),
             };
         }
         return match parse_container_name(closing, true) {
@@ -316,6 +328,10 @@ fn parse_container_name(tag: &str, closing: bool) -> Option<(FrameKind, String)>
         "RF" if !closing => (ContainerKind::Note, "RF".to_string()),
         "Rf" if closing => (ContainerKind::Note, "RF".to_string()),
         "i" if !closing => (ContainerKind::Italic, "i".to_string()),
+        "b" if !closing => (ContainerKind::Bold, "b".to_string()),
+        "sup" if !closing => (ContainerKind::Superscript, "sup".to_string()),
+        "sub" if !closing => (ContainerKind::Subscript, "sub".to_string()),
+        t if !closing && is_html_font_open(t) => (ContainerKind::Transparent, "font".to_string()),
         _ => {
             let level = tag.strip_prefix(if closing { "Ts" } else { "TS" })?;
             let level = if level.is_empty() {
@@ -389,9 +405,33 @@ fn append_node(root: &mut Vec<Node>, stack: &mut [Frame], node: Node) {
         .push(node);
 }
 
+fn is_html_font_open(tag: &str) -> bool {
+    let bytes = tag.trim_start().as_bytes();
+    bytes.len() >= 4
+        && bytes[..4].eq_ignore_ascii_case(b"font")
+        && (bytes.len() == 4 || bytes[4].is_ascii_whitespace())
+}
+
+fn append_frame(root: &mut Vec<Node>, stack: &mut [Frame], frame: Frame) {
+    if frame.kind == FrameKind::Container(ContainerKind::Transparent) {
+        for child in frame.children {
+            match child {
+                Node::Text(text) => append_text(root, stack, &text),
+                other => append_node(root, stack, other),
+            }
+        }
+    } else {
+        append_node(root, stack, build_node(frame));
+    }
+}
+
 fn build_node(frame: Frame) -> Node {
     match frame.kind {
         FrameKind::Container(ContainerKind::Italic) => Node::Italic(frame.children),
+        FrameKind::Container(ContainerKind::Bold) => Node::Bold(frame.children),
+        FrameKind::Container(ContainerKind::Superscript) => Node::Superscript(frame.children),
+        FrameKind::Container(ContainerKind::Subscript) => Node::Subscript(frame.children),
+        FrameKind::Container(ContainerKind::Transparent) => Node::Text(String::new()),
         FrameKind::Container(ContainerKind::WordsOfJesus) => Node::WordsOfJesus(frame.children),
         FrameKind::Container(ContainerKind::OtQuote) => Node::OtQuote(frame.children),
         FrameKind::Container(ContainerKind::Heading(level)) => Node::Heading(level, frame.children),
@@ -783,6 +823,28 @@ mod tests {
             "synthetic_markup_nested_unknown_and_note",
             tokenize_markup("<FI>grace <custom>kept</custom><Fi><RF>synthetic note<Rf>")
         );
+    }
+
+    #[test]
+    fn maps_html_b_sup_and_sub_tags_including_inside_notes() {
+        let nodes = tokenize_markup(
+            "<sup><b>12b</b></sup> texto H<sub>2</sub>O<RF>nota <b><i>12</i></b> <font size=\"-1\">extra</font><Rf>",
+        );
+        assert_eq!(
+            nodes,
+            vec![
+                Node::Superscript(vec![Node::Bold(vec![Node::Text("12b".into())])]),
+                Node::Text(" texto H".into()),
+                Node::Subscript(vec![Node::Text("2".into())]),
+                Node::Text("O".into()),
+                Node::Note(vec![
+                    Node::Text("nota ".into()),
+                    Node::Bold(vec![Node::Italic(vec![Node::Text("12".into())])]),
+                    Node::Text(" extra".into()),
+                ]),
+            ]
+        );
+        assert_eq!(plain_text(&nodes), "12b texto H2O");
     }
 
     proptest! {

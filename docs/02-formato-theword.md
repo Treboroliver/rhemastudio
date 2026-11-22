@@ -52,6 +52,10 @@ Tags com status **Confirmado** foram observadas em módulos reais (incluindo `kj
 | `<CM>` | Quebra de parágrafo | `Paragraph` | Confirmado |
 | `<FO>…<Fo>` | Citação do AT | `OtQuote` | Confirmado |
 | `<i>…</i>` | Itálico estilo HTML | `Italic` | Confirmado |
+| `<b>…</b>` | Negrito estilo HTML | `Bold` | Confirmado (ARA+ 2Co 13:13) |
+| `<sup>…</sup>` | Sobrescrito estilo HTML | `Superscript` | Confirmado (ARA+ 2Co 13:13) |
+| `<sub>…</sub>` | Subscrito estilo HTML | `Subscript` | Confirmado (HTML simples) |
+| `<font …>…</font>` | Envoltório HTML transparente (atributos ignorados, filhos preservados) | filhos diretos | Confirmado (ARA+) |
 | `<TS>…<Ts>` (e variações de nível) | Título de seção | `Heading(nível)` | **[VERIFICAR]** |
 | `<CL>` | Quebra de linha | `LineBreak` | **[VERIFICAR]** |
 | `<WT…>` | Morfologia | `Morph(código)` | **[VERIFICAR]** |
