@@ -71,3 +71,9 @@ As taxas não demonstram equivalência semântica; as ligações preservam prove
 - **Estrutura (`lexicon-reverse.sqlite`):** indexa Bíblias legíveis com tags `Node::Strong` gravando só contagens `(n_ws, n_w, n_s)`, sem texto bíblico; tokenização `fold_latin` (`'`/`-` internos, sem números, `<2` letras ou stopwords); troca atômica e invalidação por tamanho/data.
 - **Dice e limites:** `Dice = 2*n_ws/(n_w+n_s)` somando os módulos; descarta `n_ws < 2` (salvo acerto único). Limites: tags cobrem trechos (inclusive múltiplas tags/palavra) e o índice reflete o vocabulário de `ARA+` e `kjv`.
 - **Integração e medições (release):** grupo `"sugestões por palavra"` (`reverse_index`) antes dos resultados por corpo. Construção: 5.514 ms, 13.299.712 bytes, 5 protegidas ignoradas (`ARA+`: 28.503 palavras, 75.644 pares; `kjv`: 12.413 palavras, 45.217 pares). `unigênito`→`G3439` (pos. 1, Dice 0,480), `amor`→`G26` (pos. 1, Dice 0,550; `G25` pos. 10), `graça`→`G5485` (pos. 1, Dice 0,525). Busca com sugestões (200 consultas): abertura 3,31 ms, p50 0,36 ms, p95 41,86 ms.
+
+## E1b.2 — Busca léxica no app
+
+- **Núcleo:** `ReverseIndex` mantido aberto em `LexiconIndex` com índices `idx_wt_word`/`idx_st_strong` e `prepare_cached` reduziu o `p95` de `41,86 ms` para `6,59 ms` (máx. `10,87 ms`). As 3 primeiras sugestões Strong recebem grupos `"ligados a G<n>"` via `links_for_strong`.
+- **Tauri (`lex.rs`):** `lex_index_status`, `lex_index_build` (`spawn_blocking`, evento `lex-index-progress`, sem índice parcial), `lex_search` (consulta ≤200 chars, limite 1–100) e `lex_entry` (RTF/RVF/HTML/texto); reconstrução automática em segundo plano ao abrir e após `library_scan`.
+- **Interface (`Ctrl+K` e aba Léxico):** debounce de 120 ms, prioridade para referências bíblicas, prefixo `l `, sugestões G/H lado a lado com Dice, barra de status (`Índice pronto`/`Construindo %`/`Reconstrução necessária`) e botão `Reconstruir índice`.

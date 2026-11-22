@@ -289,6 +289,41 @@ pub fn lookup_strong(
     }))
 }
 
+/// Lê uma entrada específica de um dicionário pela chave exata (sem restrição a Strong).
+pub fn lookup_entry(
+    cache: &StudyCache,
+    module: &ModuleInfo,
+    key: &str,
+) -> Result<LexiconEntryDto, ApiError> {
+    if module.kind != ModuleKind::Dictionary {
+        return Err(ApiError::new(
+            "invalid_module",
+            "O módulo selecionado não é um léxico.",
+        ));
+    }
+    if let Some(err) = state_error(module) {
+        return Err(err);
+    }
+    let source = cache.dictionary(module)?;
+    let found = locked(&source).lookup(key)?;
+    let Some(entry) = found else {
+        return Err(ApiError::new(
+            "entry_not_found",
+            "Esta entrada não existe no módulo.",
+        ));
+    };
+    let nodes = entry.content.map_err(entry_error)?;
+    Ok(LexiconEntryDto {
+        key: key.to_string(),
+        title: entry.subject,
+        original_word: entry.strong_orig_word,
+        module_id: module.id.clone(),
+        module_title: module.title.clone(),
+        degraded: entry.degraded,
+        nodes: convert_nodes(&nodes),
+    })
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct CommentaryHeaderDto {
     pub topic_id: i64,

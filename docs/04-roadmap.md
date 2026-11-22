@@ -7,7 +7,7 @@ Marque `[x]` ao concluir. Cada milestone só termina quando **todos** os critér
 - [x] E1a.2 Índice de léxicos (tantivy), busca integrada e CLI; ver [09-indice-lexical.md](09-indice-lexical.md).
 - [x] E1a.3 Decodificador HTML, desempate por tipo e total real da busca; ver [09-indice-lexical.md](09-indice-lexical.md).
 - [x] E1b.1 Índice reverso palavra → Strong e integração na busca léxica; ver [09-indice-lexical.md](09-indice-lexical.md).
-- [ ] E1b.2 Interface: modo "léxico" na barra Ctrl+K e campo na aba Léxico.
+- [x] E1b.2 Busca léxica no app (`Ctrl+K`, aba Léxico e índices em segundo plano); ver [09-indice-lexical.md](09-indice-lexical.md).
 
 ---
 

@@ -4,10 +4,12 @@
   import {
     passageFromRange,
     prettyRange,
+    asApiError,
     type Passage,
     type RefErrorDto,
     type ResolveDto
   } from './reader'
+  import { formatLexField, type LexSearchDto, type LexSearchHitDto } from './study'
 
   interface Props {
     t: (key: string, values?: Record<string, string | number>) => string
@@ -18,28 +20,56 @@
     onSelectBible: (module: ModuleInfo) => void
     onClose: () => void
     delay?: number
+    lexDelay?: number
+    lexSearch?: (query: string, limit?: number) => Promise<LexSearchDto>
+    onSelectLexicon?: (hit: LexSearchHitDto) => void
   }
 
-  let { t, bibles, selectedBibleIds, resolve, onGo, onSelectBible, onClose, delay = 30 }: Props = $props()
+  let {
+    t,
+    bibles,
+    selectedBibleIds,
+    resolve,
+    onGo,
+    onSelectBible,
+    onClose,
+    delay = 30,
+    lexDelay = 120,
+    lexSearch,
+    onSelectLexicon
+  }: Props = $props()
 
   interface Choice {
     id: string
     label: string
     detail: string
+    group?: string
+    hit?: LexSearchHitDto
     run: () => void
   }
 
   const listId = $props.id()
   let text = $state('')
   let result = $state<ResolveDto | null>(null)
+  let lexResult = $state<LexSearchDto | null>(null)
+  let lexErrorCode = $state<string | null>(null)
   let active = $state(0)
   let input = $state<HTMLInputElement | null>(null)
   let dialog = $state<HTMLElement | null>(null)
   let timer: ReturnType<typeof setTimeout> | undefined
+  let lexTimer: ReturnType<typeof setTimeout> | undefined
   let sequence = 0
+  let lexSequence = 0
   const previousFocus = typeof document === 'undefined' ? null : document.activeElement
 
+  const forcedLexQuery = $derived.by(() => {
+    const trimmed = text.trimStart()
+    if (/^l\s+/i.test(trimmed)) return trimmed.slice(2).trim()
+    return null
+  })
+
   const bibleMatch = $derived.by(() => {
+    if (forcedLexQuery !== null) return null
     const query = text.trim().toLowerCase()
     if (!query) return null
     return bibles.find((module) => module.abbreviation?.toLowerCase() === query) ?? null
@@ -66,32 +96,65 @@
         }
       ]
     }
-    if (!result) return []
     const list: Choice[] = []
-    for (const range of result.ranges) {
-      list.push({
-        id: `range-${list.length}`,
-        label: prettyRange(range.label),
-        detail: t('goTo'),
-        run: () => onGo(passageFromRange(range))
-      })
+    if (result) {
+      for (const range of result.ranges) {
+        list.push({
+          id: `range-${list.length}`,
+          label: prettyRange(range.label),
+          detail: t('goTo'),
+          run: () => onGo(passageFromRange(range))
+        })
+      }
+      for (const item of result.suggestions) {
+        const target = item.range
+        list.push({
+          id: `suggestion-${list.length}`,
+          label: target ? prettyRange(target.label) : item.name,
+          detail: item.abbreviation,
+          run: () => onGo(target ? passageFromRange(target) : { book: item.book, chapter: 1, verse: null })
+        })
+      }
     }
-    for (const item of result.suggestions) {
-      const target = item.range
-      list.push({
-        id: `suggestion-${list.length}`,
-        label: target ? prettyRange(target.label) : item.name,
-        detail: item.abbreviation,
-        run: () => onGo(target ? passageFromRange(target) : { book: item.book, chapter: 1, verse: null })
-      })
+    if (list.length === 0 && lexResult && onSelectLexicon) {
+      for (const group of lexResult.groups) {
+        const groupLabel = group.is_suggestions ? t('lexSuggestionsGroup') : group.label
+        for (const hit of group.hits) {
+          const diceText = hit.dice !== null ? ` · ${t('lexDice', { value: hit.dice.toFixed(2) })}` : ''
+          const prov = hit.provenance && !group.is_suggestions ? ` · ${hit.provenance}` : ''
+          const detail = group.is_suggestions
+            ? `${formatLexField(t, hit.field)}${diceText}`
+            : `${formatLexField(t, hit.field)}${prov}`
+          list.push({
+            id: `lex-${list.length}-${hit.module_id}-${hit.key}`,
+            label: hit.key,
+            detail,
+            group: groupLabel,
+            hit,
+            run: () => onSelectLexicon(hit)
+          })
+        }
+      }
     }
     return list
   })
 
+  const isLexMode = $derived(
+    forcedLexQuery !== null ||
+      (!bibleMatch &&
+        !(result?.ranges.length ?? 0) &&
+        !(result?.suggestions.length ?? 0) &&
+        (lexResult !== null || lexErrorCode !== null))
+  )
+
   const hasSuggestions = $derived((result?.suggestions.length ?? 0) > 0)
 
   const messages = $derived.by(() => {
-    if (!result || bibleMatch || !text.trim()) return []
+    if (lexErrorCode === 'lex_index_building') return [t('lexSearchBuilding')]
+    if (lexErrorCode === 'lex_rebuild_required') return [t('lexIndexRebuildNeeded')]
+    if (lexErrorCode) return [t('lexSearchError')]
+    if (isLexMode && lexResult && lexResult.groups.length === 0 && text.trim()) return [t('lexSearchEmpty')]
+    if (!result || bibleMatch || isLexMode || !text.trim()) return []
     return result.errors
       .filter((error) => !(hasSuggestions && (error.code === 'unknown_book' || error.code === 'invalid_syntax')))
       .map(describe)
@@ -120,17 +183,63 @@
     }
   }
 
+  async function runLex(query: string) {
+    if (!lexSearch) return
+    const current = ++lexSequence
+    if (!query.trim()) {
+      lexResult = null
+      lexErrorCode = null
+      return
+    }
+    try {
+      const found = await lexSearch(query.trim(), 20)
+      if (current === lexSequence) {
+        lexResult = found
+        lexErrorCode = null
+        active = 0
+      }
+    } catch (cause) {
+      if (current === lexSequence) {
+        lexResult = null
+        lexErrorCode = asApiError(cause).code
+      }
+    }
+  }
+
   async function run(query: string) {
+    const trimmed = query.trimStart()
+    if (/^l\s+/i.test(trimmed)) {
+      result = null
+      clearTimeout(lexTimer)
+      const lexQ = trimmed.slice(2).trim()
+      lexTimer = setTimeout(() => void runLex(lexQ), lexDelay)
+      return
+    }
     const current = ++sequence
     if (!query.trim()) {
       result = null
+      lexResult = null
+      lexErrorCode = null
       return
     }
     try {
       const outcome = await resolve(query)
-      if (current === sequence) {
-        result = outcome
-        active = 0
+      if (current !== sequence) return
+      result = outcome
+      active = 0
+      if (
+        !bibleMatch &&
+        outcome.ranges.length === 0 &&
+        outcome.suggestions.length === 0 &&
+        lexSearch
+      ) {
+        clearTimeout(lexTimer)
+        lexTimer = setTimeout(() => void runLex(query), lexDelay)
+      } else {
+        clearTimeout(lexTimer)
+        lexSequence++
+        lexResult = null
+        lexErrorCode = null
       }
     } catch {
       if (current === sequence) result = { ranges: [], errors: [{ code: 'invalid_syntax' }], suggestions: [] }
@@ -139,13 +248,21 @@
 
   function oninput() {
     clearTimeout(timer)
+    clearTimeout(lexTimer)
     const query = text
+    const trimmed = query.trimStart()
+    if (/^l\s+/i.test(trimmed)) {
+      result = null
+      const lexQ = trimmed.slice(2).trim()
+      lexTimer = setTimeout(() => void runLex(lexQ), lexDelay)
+      return
+    }
     timer = setTimeout(() => void run(query), delay)
   }
 
   async function confirm() {
     clearTimeout(timer)
-    if (!bibleMatch && !result?.ranges.length && !result?.suggestions.length) return
+    clearTimeout(lexTimer)
     if (choices.length === 0) return
     choices[Math.min(active, choices.length - 1)]?.run()
     onClose()
@@ -191,6 +308,7 @@
 
   onDestroy(() => {
     clearTimeout(timer)
+    clearTimeout(lexTimer)
     if (previousFocus instanceof HTMLElement) previousFocus.focus()
   })
 </script>
@@ -228,6 +346,9 @@
   {/each}
   <ul class="command-list" id={listId} role="listbox" aria-label={t('commandResults')}>
     {#each choices as choice, index (choice.id)}
+      {#if choice.group && (index === 0 || choices[index - 1]?.group !== choice.group)}
+        <li class="command-group-heading" role="presentation">{choice.group}</li>
+      {/if}
       <li
         id={`${listId}-${index}`}
         role="option"

@@ -32,7 +32,7 @@
     type AppSettings,
     type ModuleInfo
   } from './lib/modules'
-  import type { StrongRequest, StudyTab } from './lib/study'
+  import { lexSearch, type LexEntryRequest, type LexSearchHitDto, type StrongRequest, type StudyTab } from './lib/study'
   import {
     addBibleColumn,
     applyTheme,
@@ -94,6 +94,8 @@
   let showCommand = $state(false)
   let studyTab = $state<StudyTab>('lexicon')
   let strongRequest = $state<StrongRequest | null>(null)
+  let lexEntryRequest = $state<LexEntryRequest | null>(null)
+  let lexEntrySequence = 0
   let studyPanel = $state<ReturnType<typeof StudyPanel> | null>(null)
   let strongAnchor: HTMLElement | null = null
   let panelReturnFocus: HTMLElement | null = null
@@ -474,6 +476,20 @@
     void tick().then(() => setTimeout(() => studyPanel?.focusContent(), 0))
   }
 
+  function openLexiconHit(hit: LexSearchHitDto) {
+    studyTab = 'lexicon'
+    if (!studyOpen) {
+      settings = { ...settings, study_panel_open: true }
+      void saveSettings({ study_panel_open: true })
+    }
+    if (hit.kind === 'strong' || /^[GH]\d+$/i.test(hit.key)) {
+      strongRequest = { ids: [hit.key], seq: ++strongSequence }
+    } else {
+      lexEntryRequest = { moduleId: hit.module_id, key: hit.key, seq: ++lexEntrySequence }
+    }
+    void tick().then(() => setTimeout(() => studyPanel?.focusContent(), 0))
+  }
+
   function openEntry(id: string) {
     strongRequest = { ids: [id], seq: ++strongSequence }
     studyTab = 'lexicon'
@@ -804,6 +820,7 @@
         expanded={settings.study_panel_expanded ?? false}
         tab={studyTab}
         {strongRequest}
+        {lexEntryRequest}
         selection={verseSelection}
         commentaries={commentaryModules}
         activeCommentaryIds={activeCommentaryIds}
@@ -839,8 +856,10 @@
         bibles={readyBibles}
         {selectedBibleIds}
         resolve={resolveText}
+        {lexSearch}
         onGo={(target) => navigate(target)}
         onSelectBible={selectBible}
+        onSelectLexicon={openLexiconHit}
         onClose={() => (showCommand = false)}
       />
     {/if}

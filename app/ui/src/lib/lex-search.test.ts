@@ -1,0 +1,213 @@
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { tick } from 'svelte'
+import { cleanup, fireEvent, render, screen } from '@testing-library/svelte'
+import CommandBar from './CommandBar.svelte'
+import LexiconTab from './LexiconTab.svelte'
+import ptBR from '../i18n/pt-BR.json'
+import type { LexSearchDto } from './study'
+
+const labels: Record<string, string> = ptBR
+const t = (key: string, values?: Record<string, string | number>) => {
+  let text = labels[key] ?? key
+  if (values) {
+    for (const [k, v] of Object.entries(values)) {
+      text = text.replaceAll(`{${k}}`, String(v))
+    }
+  }
+  return text
+}
+
+const sampleLexResult: LexSearchDto = {
+  query: 'amor',
+  total: 3,
+  shown: 3,
+  interpretations: ['Latin("amor")'],
+  notes: [],
+  groups: [
+    {
+      label: 'sugestões por palavra',
+      module_id: 'sugestões por palavra',
+      kind: 'strong',
+      is_suggestions: true,
+      is_linked: false,
+      hits: [
+        {
+          module_id: 'strong.dct.twm',
+          module_title: 'Strong',
+          kind: 'strong',
+          key: 'G26',
+          field: 'reverse_index',
+          score: 172,
+          provenance: 'reverse_index (Dice 0.550)',
+          dice: 0.55
+        },
+        {
+          module_id: 'strong.dct.twm',
+          module_title: 'Strong',
+          kind: 'strong',
+          key: 'H160',
+          field: 'reverse_index',
+          score: 159,
+          provenance: 'reverse_index (Dice 0.234)',
+          dice: 0.234
+        }
+      ]
+    },
+    {
+      label: 'Louw-Nida',
+      module_id: 'louw.dct.twm',
+      kind: 'louw_nida',
+      is_suggestions: false,
+      is_linked: false,
+      hits: [
+        {
+          module_id: 'louw.dct.twm',
+          module_title: 'Louw-Nida',
+          kind: 'louw_nida',
+          key: '25.43',
+          field: 'key',
+          score: 1000,
+          provenance: null,
+          dice: null
+        }
+      ]
+    }
+  ]
+}
+
+describe('Busca léxica na CommandBar e na aba Léxico', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.useRealTimers()
+  })
+
+  it('mantém prioridade da referência bíblica na CommandBar', async () => {
+    const resolve = vi.fn().mockResolvedValue({
+      ranges: [{ label: 'Jo 3:16', book: 43, start_chapter: 3, start_verse: 16, end_chapter: 3, end_verse: 16 }],
+      errors: [],
+      suggestions: []
+    })
+    const lexSearch = vi.fn().mockResolvedValue(sampleLexResult)
+
+    render(CommandBar, {
+      t,
+      bibles: [],
+      selectedBibleIds: [],
+      resolve,
+      lexSearch,
+      onGo: vi.fn(),
+      onSelectBible: vi.fn(),
+      onSelectLexicon: vi.fn(),
+      onClose: vi.fn()
+    })
+
+    const input = screen.getByRole('combobox')
+    await fireEvent.input(input, { target: { value: 'Jo 3:16' } })
+    await vi.advanceTimersByTimeAsync(200)
+
+    expect(resolve).toHaveBeenCalled()
+    expect(lexSearch).not.toHaveBeenCalled()
+  })
+
+  it('ativa busca léxica com debounce de 120 ms, prefixo l e navegação por teclado', async () => {
+    const resolve = vi.fn().mockResolvedValue({ ranges: [], errors: [{ code: 'unknown_book', text: 'amor' }], suggestions: [] })
+    const lexSearch = vi.fn().mockResolvedValue(sampleLexResult)
+    const onSelectLexicon = vi.fn()
+    const onClose = vi.fn()
+
+    render(CommandBar, {
+      t,
+      bibles: [],
+      selectedBibleIds: [],
+      resolve,
+      lexSearch,
+      onGo: vi.fn(),
+      onSelectBible: vi.fn(),
+      onSelectLexicon,
+      onClose
+    })
+
+    const input = screen.getByRole('combobox')
+    await fireEvent.input(input, { target: { value: 'l amor' } })
+    await vi.advanceTimersByTimeAsync(80)
+    expect(lexSearch).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(50)
+    await tick()
+    expect(lexSearch).toHaveBeenCalledWith('amor', 20)
+    expect(resolve).not.toHaveBeenCalled()
+
+    await fireEvent.keyDown(input, { key: 'ArrowDown' })
+    await tick()
+    await fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onSelectLexicon).toHaveBeenCalledWith(expect.objectContaining({ key: 'H160' }))
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('exibe status do índice, busca agrupada e abre entrada não-Strong na aba Léxico', async () => {
+    const statusFn = vi.fn().mockResolvedValue({
+      state: 'building',
+      stage: 'lexicon',
+      module_index: 1,
+      module_count: 2,
+      percent: 43,
+      module_id: 'strong.dct.twm',
+      entries_processed: 100,
+      message: null
+    })
+    const buildFn = vi.fn().mockResolvedValue({
+      state: 'ready',
+      stage: null,
+      module_index: 0,
+      module_count: 0,
+      percent: 100,
+      module_id: null,
+      entries_processed: 0,
+      message: null
+    })
+    const searchFn = vi.fn().mockResolvedValue(sampleLexResult)
+    const loadEntryFn = vi.fn().mockResolvedValue({
+      key: '25.43',
+      title: '25.43',
+      original_word: null,
+      module_id: 'louw.dct.twm',
+      module_title: 'Louw-Nida',
+      degraded: false,
+      nodes: [{ type: 'text', value: 'Texto sintetico' }]
+    })
+
+    render(LexiconTab, {
+      t,
+      request: null,
+      onVerse: vi.fn(),
+      onManageFolders: vi.fn(),
+      statusFn,
+      buildFn,
+      searchFn,
+      loadEntryFn
+    })
+
+    await vi.advanceTimersByTimeAsync(10)
+    expect(screen.getByText('Construindo 43%')).toBeTruthy()
+
+    const searchInput = screen.getByRole('combobox')
+    await fireEvent.input(searchInput, { target: { value: 'amor' } })
+    await vi.advanceTimersByTimeAsync(130)
+
+    expect(searchFn).toHaveBeenCalledWith('amor', 30)
+    expect(screen.getByText('Grego')).toBeTruthy()
+    expect(screen.getByText('Hebraico')).toBeTruthy()
+    expect(screen.getByText('Louw-Nida')).toBeTruthy()
+
+    await fireEvent.keyDown(searchInput, { key: 'ArrowDown' })
+    await fireEvent.keyDown(searchInput, { key: 'ArrowDown' })
+    await fireEvent.keyDown(searchInput, { key: 'Enter' })
+    await vi.advanceTimersByTimeAsync(10)
+
+    expect(loadEntryFn).toHaveBeenCalledWith('louw.dct.twm', '25.43')
+    expect(screen.getByText('Texto sintetico')).toBeTruthy()
+  })
+})

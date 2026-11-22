@@ -19,6 +19,7 @@ tauri-build = { version = "2.7.3", features = [] }
 
 [dependencies]
 rhema-core = { path = "../../crates/rhema-core" }
+rhema-lexicon = { path = "../../crates/rhema-lexicon" }
 rhema-library = { path = "../../crates/rhema-library" }
 rhema-refs = { path = "../../crates/rhema-refs" }
 rhema-sermon = { path = "../../crates/rhema-sermon" }

@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use rhema_core::ModuleError;
@@ -240,6 +241,8 @@ pub struct SearchFilters {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SearchHit {
+    pub module_id: String,
+    pub kind: LexKind,
     pub key: String,
     pub field: MatchField,
     pub score: f32,
@@ -844,6 +847,7 @@ pub struct LexiconIndex {
     f: Fields,
     links_db: Option<PathBuf>,
     reverse_db: Option<PathBuf>,
+    reverse_index: Option<Mutex<crate::ReverseIndex>>,
     path_to_id: HashMap<String, String>,
 }
 
@@ -887,6 +891,7 @@ impl LexiconIndex {
             f,
             links_db: None,
             reverse_db: None,
+            reverse_index: None,
             path_to_id,
         })
     }
@@ -899,7 +904,9 @@ impl LexiconIndex {
 
     /// Usa o índice reverso palavra → Strong (E1b.1) nas consultas em latim, se existir.
     pub fn with_reverse(mut self, path: impl Into<PathBuf>) -> Self {
-        self.reverse_db = Some(path.into());
+        let path = path.into();
+        self.reverse_index = crate::ReverseIndex::open(&path).ok().map(Mutex::new);
+        self.reverse_db = Some(path);
         self
     }
 
@@ -1205,10 +1212,14 @@ impl LexiconIndex {
                     .to_string()
             };
             let (field, interpretation, provenance) = &meta[i];
+            let module_id = get(self.f.module_id);
+            let kind = LexKind::parse(&get(self.f.kind));
             hits.push((
-                get(self.f.module_id),
-                LexKind::parse(&get(self.f.kind)),
+                module_id.clone(),
+                kind,
                 SearchHit {
+                    module_id,
+                    kind,
                     key: get(self.f.key),
                     field: *field,
                     score,
@@ -1237,14 +1248,14 @@ impl LexiconIndex {
                 }),
             }
         }
-        if let Some(sug_group) =
-            self.reverse_suggestions(&interpretations, limit, filters, &searcher, &mut notes)?
-        {
+        let extra_groups =
+            self.reverse_suggestions(&interpretations, limit, filters, &searcher, &mut notes)?;
+        if !extra_groups.is_empty() {
             let body_pos = groups
                 .iter()
                 .position(|g| g.hits.iter().all(|h| h.field == MatchField::Body))
                 .unwrap_or(groups.len());
-            groups.insert(body_pos, sug_group);
+            groups.splice(body_pos..body_pos, extra_groups);
         }
         Ok(SearchResults {
             interpretations,
@@ -1262,30 +1273,38 @@ impl LexiconIndex {
         filters: &SearchFilters,
         searcher: &tantivy::Searcher,
         notes: &mut Vec<String>,
-    ) -> Result<Option<ModuleHits>, LexiconError> {
+    ) -> Result<Vec<ModuleHits>, LexiconError> {
         let Some(db) = self.reverse_db.as_ref().filter(|p| p.exists()) else {
-            return Ok(None);
+            return Ok(Vec::new());
         };
         if !filters.kinds.is_empty() && !filters.kinds.contains(&LexKind::Strong) {
-            return Ok(None);
+            return Ok(Vec::new());
         }
         let latin_word = interpretations.iter().find_map(|q| match q {
             Query::Latin(w) if !w.trim().contains(char::is_whitespace) => Some(w.as_str()),
             _ => None,
         });
         let Some(word) = latin_word else {
-            return Ok(None);
+            return Ok(Vec::new());
         };
-        let suggestions =
-            match crate::ReverseIndex::open(db).and_then(|r| r.suggest_strongs(word, limit)) {
+        let sug_limit = limit.min(3);
+        let suggestions = if let Some(guard) = &self.reverse_index {
+            let rev = guard
+                .lock()
+                .map_err(|_| LexiconError::Invalid("Índice reverso bloqueado".into()))?;
+            rev.suggest_strongs(word, sug_limit)?
+        } else {
+            match crate::ReverseIndex::open(db).and_then(|r| r.suggest_strongs(word, sug_limit)) {
                 Ok(s) => s,
                 Err(error) => {
                     notes.push(format!("Índice reverso indisponível: {error}"));
-                    return Ok(None);
+                    return Ok(Vec::new());
                 }
-            };
+            }
+        };
         let mut hits = Vec::new();
-        for sug in suggestions {
+        let mut linked_groups = Vec::new();
+        for (idx, sug) in suggestions.iter().enumerate() {
             let q = self.filtered(
                 all(vec![
                     term(self.f.kind, LexKind::Strong.as_str()),
@@ -1296,12 +1315,19 @@ impl LexiconIndex {
             let found = searcher.search(&*q, &TopDocs::with_limit(1).order_by_score())?;
             if let Some((_, addr)) = found.first() {
                 let doc: TantivyDocument = searcher.doc(*addr)?;
+                let module_id = doc
+                    .get_first(self.f.module_id)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
                 let key = doc
                     .get_first(self.f.key)
                     .and_then(|v| v.as_str())
                     .unwrap_or(&sug.strong)
                     .to_string();
                 hits.push(SearchHit {
+                    module_id,
+                    kind: LexKind::Strong,
                     key,
                     field: MatchField::ReverseIndex,
                     score: MatchField::ReverseIndex.base() + (sug.dice as f32) * 40.0,
@@ -1309,16 +1335,77 @@ impl LexiconIndex {
                     provenance: Some(format!("reverse_index (Dice {:.3})", sug.dice)),
                 });
             }
+            if idx < 3 {
+                if let Some(group) = self.linked_group_for_strong(&sug.strong, filters, notes) {
+                    linked_groups.push(group);
+                }
+            }
         }
-        if hits.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(ModuleHits {
+        let mut out = Vec::new();
+        if !hits.is_empty() {
+            out.push(ModuleHits {
                 module_id: "sugestões por palavra".into(),
                 kind: LexKind::Strong,
                 hits,
-            }))
+            });
+            out.extend(linked_groups);
         }
+        Ok(out)
+    }
+
+    fn linked_group_for_strong(
+        &self,
+        strong: &str,
+        filters: &SearchFilters,
+        notes: &mut Vec<String>,
+    ) -> Option<ModuleHits> {
+        let db = self.links_db.as_ref().filter(|p| p.exists())?;
+        let links = match links_for_strong(db, strong) {
+            Ok(l) => l,
+            Err(error) => {
+                notes.push(format!("Ligações indisponíveis: {error}"));
+                return None;
+            }
+        };
+        let mut seen = BTreeSet::new();
+        let mut hits = Vec::new();
+        for link in links {
+            let Some(module_id) = self.path_to_id.get(&link.target_module) else {
+                continue;
+            };
+            if !filters.modules.is_empty() && !filters.modules.contains(module_id) {
+                continue;
+            }
+            let kind = match link.kind {
+                crate::LinkKind::Ditat => LexKind::Ditat,
+                crate::LinkKind::LouwNida => LexKind::LouwNida,
+                crate::LinkKind::Ditnt => LexKind::Ditnt,
+            };
+            if !filters.kinds.is_empty() && !filters.kinds.contains(&kind) {
+                continue;
+            }
+            if !seen.insert((module_id.clone(), link.key.clone())) {
+                continue;
+            }
+            let provenance = match &link.subentry {
+                Some(sub) => format!("{} [{sub}]", link.provenance),
+                None => link.provenance.clone(),
+            };
+            hits.push(SearchHit {
+                module_id: module_id.clone(),
+                kind,
+                key: link.key,
+                field: MatchField::Link,
+                score: MatchField::ReverseIndex.base() - 10.0,
+                interpretation: format!("strong:{strong}"),
+                provenance: Some(provenance),
+            });
+        }
+        (!hits.is_empty()).then(|| ModuleHits {
+            module_id: format!("ligados a {strong}"),
+            kind: hits[0].kind,
+            hits,
+        })
     }
 }
 

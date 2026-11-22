@@ -12,6 +12,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use thiserror::Error;
 
+mod lex;
 mod reader;
 mod sermon;
 mod snapshot;
@@ -113,6 +114,7 @@ struct AppState {
     catalog: Mutex<Vec<ModuleInfo>>,
     readers: Arc<ReaderCache>,
     study: Arc<StudyCache>,
+    lex: Arc<lex::LexState>,
 }
 
 impl AppState {
@@ -368,6 +370,18 @@ fn library_scan(
         .catalog
         .lock()
         .map_err(|_| "catálogo indisponível".to_string())? = modules.clone();
+    if lex::index_status(&state.lex, &modules).state == "rebuild_needed" {
+        let scan_folders = lex::collect_scan_folders(&modules, &folders);
+        if !scan_folders.is_empty() {
+            let lex_state = Arc::clone(&state.lex);
+            let handle = app.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let _ = lex::build_all_indexes(&lex_state, &scan_folders, |ev| {
+                    let _ = handle.emit(lex::LEX_PROGRESS_EVENT, ev);
+                });
+            });
+        }
+    }
     Ok(modules)
 }
 
@@ -465,6 +479,55 @@ fn study_snapshot(state: &AppState) -> Result<(Vec<ModuleInfo>, AppSettings), Ap
         .settings()
         .map_err(|error| ApiError::internal(error.to_string()))?;
     Ok((catalog, settings))
+}
+
+#[tauri::command]
+fn lex_index_status(state: State<'_, AppState>) -> Result<lex::LexIndexStatusDto, ApiError> {
+    let (catalog, _) = study_snapshot(&state)?;
+    Ok(lex::index_status(&state.lex, &catalog))
+}
+
+#[tauri::command]
+async fn lex_index_build(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<lex::LexIndexStatusDto, ApiError> {
+    let (catalog, settings) = study_snapshot(&state)?;
+    let folders = lex::collect_scan_folders(&catalog, &settings.module_folders);
+    let lex_state = Arc::clone(&state.lex);
+    tauri::async_runtime::spawn_blocking(move || {
+        lex::build_all_indexes(&lex_state, &folders, |ev| {
+            let _ = app.emit(lex::LEX_PROGRESS_EVENT, ev);
+        })
+    })
+    .await
+    .map_err(|error| ApiError::internal(error.to_string()))?
+}
+
+#[tauri::command]
+async fn lex_search(
+    query: String,
+    limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<lex::LexSearchDto, ApiError> {
+    let (catalog, _) = study_snapshot(&state)?;
+    let lex_state = Arc::clone(&state.lex);
+    tauri::async_runtime::spawn_blocking(move || lex::search(&lex_state, &catalog, &query, limit))
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
+}
+
+#[tauri::command]
+async fn lex_entry(
+    module_id: String,
+    key: String,
+    state: State<'_, AppState>,
+) -> Result<study::LexiconEntryDto, ApiError> {
+    let (catalog, _) = study_snapshot(&state)?;
+    let cache = Arc::clone(&state.study);
+    tauri::async_runtime::spawn_blocking(move || lex::entry(&cache, &catalog, &module_id, &key))
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
 }
 
 #[tauri::command]
@@ -624,6 +687,9 @@ pub fn run() {
             let library = Library::new(app_data.join("library"));
             app.manage(sermon::SermonState::open(&app_data));
             let cached = library.list_cached(&settings.module_folders);
+            let lex_state = Arc::new(lex::LexState::new(&app_data));
+            let spawn_auto = lex::index_status(&lex_state, &cached).state == "rebuild_needed";
+            let auto_folders = lex::collect_scan_folders(&cached, &settings.module_folders);
             app.manage(AppState {
                 library,
                 settings_path,
@@ -631,7 +697,16 @@ pub fn run() {
                 catalog: Mutex::new(cached),
                 readers: Arc::new(ReaderCache::new(READER_CACHE_CAPACITY)),
                 study: Arc::new(StudyCache::new(STUDY_CACHE_CAPACITY)),
+                lex: Arc::clone(&lex_state),
             });
+            if spawn_auto && !auto_folders.is_empty() {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    let _ = lex::build_all_indexes(&lex_state, &auto_folders, |ev| {
+                        let _ = handle.emit(lex::LEX_PROGRESS_EVENT, ev);
+                    });
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -644,6 +719,10 @@ pub fn run() {
             get_chapter,
             get_chapters,
             lookup_strong,
+            lex_index_status,
+            lex_index_build,
+            lex_search,
+            lex_entry,
             get_verse_snapshot,
             get_lexicon_snapshot,
             get_commentary_index,

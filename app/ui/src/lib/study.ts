@@ -49,8 +49,96 @@ export interface CommentaryPageDto {
   nodes: UiNode[]
 }
 
+export interface LexIndexStatusDto {
+  state: 'ready' | 'rebuild_needed' | 'building' | 'empty' | 'error'
+  stage: string | null
+  module_index: number
+  module_count: number
+  percent: number
+  module_id: string | null
+  entries_processed: number
+  message: string | null
+}
+
+export interface LexProgressEvent {
+  state: string
+  stage: string
+  module_index: number
+  module_count: number
+  percent: number
+  module_id: string | null
+  entries_processed: number
+}
+
+export interface LexSearchHitDto {
+  module_id: string
+  module_title: string
+  kind: string
+  key: string
+  field: string
+  score: number
+  provenance: string | null
+  dice: number | null
+}
+
+export interface LexSearchGroupDto {
+  label: string
+  module_id: string
+  kind: string
+  is_suggestions: boolean
+  is_linked: boolean
+  hits: LexSearchHitDto[]
+}
+
+export interface LexSearchDto {
+  query: string
+  total: number
+  shown: number
+  interpretations: string[]
+  groups: LexSearchGroupDto[]
+  notes: string[]
+}
+
+export interface LexEntryRequest {
+  moduleId: string
+  key: string
+  seq: number
+}
+
 export const lookupStrong = (strongId: string) =>
   invoke<LexiconEntryDto>('lookup_strong', { strongId })
+
+export const lexEntry = (moduleId: string, key: string) =>
+  invoke<LexiconEntryDto>('lex_entry', { moduleId, key })
+
+export const lexSearch = (query: string, limit?: number) =>
+  invoke<LexSearchDto>('lex_search', { query, limit })
+
+export const lexIndexStatus = () =>
+  invoke<LexIndexStatusDto>('lex_index_status')
+
+export const lexIndexBuild = () =>
+  invoke<LexIndexStatusDto>('lex_index_build')
+
+export function formatLexField(
+  t: (key: string, values?: Record<string, string | number>) => string,
+  field: string
+): string {
+  const known = [
+    'key',
+    'subentrada',
+    'dominio',
+    'ligacao',
+    'lemma',
+    'lemma_prefixo',
+    'translit',
+    'key_norm',
+    'refs',
+    'reverse_index',
+    'body'
+  ]
+  return known.includes(field) ? t(`lexField_${field}`) : field
+}
 
 export const getCommentaryIndex = (book: number, chapter: number, verse: number) =>
   invoke<CommentaryIndexDto>('get_commentary_index', { book, chapter, verse })

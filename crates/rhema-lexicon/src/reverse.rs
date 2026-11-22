@@ -428,7 +428,11 @@ fn build_reverse_into(
         ));
     }
 
-    db.execute_batch("CREATE INDEX idx_cooc_word ON cooccurrences(word);")?;
+    db.execute_batch(
+        "CREATE INDEX idx_cooc_word ON cooccurrences(word);
+         CREATE INDEX idx_wt_word ON word_totals(word);
+         CREATE INDEX idx_st_strong ON strong_totals(strong);",
+    )?;
     drop(db);
 
     Ok(ReverseBuildReport {
@@ -508,17 +512,14 @@ impl ReverseIndex {
 
         let n_w: u64 = self
             .db
-            .query_row(
-                "SELECT COALESCE(SUM(n_w), 0) FROM word_totals WHERE word = ?1",
-                [token],
-                |r| r.get::<_, i64>(0),
-            )?
+            .prepare_cached("SELECT COALESCE(SUM(n_w), 0) FROM word_totals WHERE word = ?1")?
+            .query_row([token], |r| r.get::<_, i64>(0))?
             .max(0) as u64;
         if n_w == 0 {
             return Ok(Vec::new());
         }
 
-        let mut stmt = self.db.prepare(
+        let mut stmt = self.db.prepare_cached(
             "SELECT c.strong,
                     SUM(c.n_ws) AS total_ws,
                     (SELECT COALESCE(SUM(st.n_s), 0) FROM strong_totals st WHERE st.strong = c.strong) AS total_s,

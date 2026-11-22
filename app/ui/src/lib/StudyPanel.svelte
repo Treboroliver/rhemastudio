@@ -5,7 +5,7 @@
   import type { SermonBridge } from './sermonSession'
   import type { ModuleInfo } from './modules'
   import type { NodeActions } from './reader'
-  import type { StrongRequest, StudyTab } from './study'
+  import type { LexEntryRequest, StrongRequest, StudyTab } from './study'
 
   interface Props {
     t: (key: string, values?: Record<string, string | number>) => string
@@ -15,6 +15,7 @@
     expanded?: boolean
     tab: StudyTab
     strongRequest: StrongRequest | null
+    lexEntryRequest?: LexEntryRequest | null
     selection: { book: number; chapter: number; verse: number } | null
     commentaries: ModuleInfo[]
     activeCommentaryIds: string[]
@@ -37,6 +38,7 @@
     expanded = false,
     tab,
     strongRequest,
+    lexEntryRequest = null,
     selection,
     commentaries,
     activeCommentaryIds,
@@ -129,7 +131,7 @@
     tabindex="-1"
     hidden={tab !== 'lexicon'}
   >
-    <LexiconTab {t} request={strongRequest} {onVerse} {onManageFolders} onInsert={onInsertLexicon} />
+    <LexiconTab {t} request={strongRequest} entryRequest={lexEntryRequest} active={open && tab === 'lexicon'} {onVerse} {onManageFolders} onInsert={onInsertLexicon} />
   </div>
   <div
     class="study-body"

@@ -162,18 +162,30 @@ fn integrates_reverse_suggestions_into_lexicon_search() -> Result<(), LexiconErr
         &[("G25", "ἀγαπάω", "querer bem inventado")],
     )?;
     write_strong_dict(
+        &mods.join("louw-nida.dct.twm"),
+        &[(
+            "25.43",
+            "",
+            "Domínio: 25 Subdomínio: A (25.1 a 25.9) ἀγαπάω Significado: afeição",
+        )],
+    )?;
+    write_strong_dict(
         &mods.join("glossario.dct.twm"),
         &[("Outro", "", "verbete com carinho no corpo")],
     )?;
 
     let index_dir = dir.path().join("indice");
     let rev_path = dir.path().join("reverse.sqlite");
+    let links_path = dir.path().join("links.sqlite");
     build_index(&index_dir, std::slice::from_ref(&mods), &mut |_| {})?;
     build_reverse_index(&rev_path, std::slice::from_ref(&mods))?;
+    crate::build_links(&links_path, std::slice::from_ref(&mods))?;
 
-    let index = LexiconIndex::open(&index_dir)?.with_reverse(&rev_path);
+    let index = LexiconIndex::open(&index_dir)?
+        .with_links(&links_path)
+        .with_reverse(&rev_path);
     let results = index.search("carinho", 20, &SearchFilters::default())?;
-    assert_eq!(results.groups.len(), 2);
+    assert_eq!(results.groups.len(), 3);
     assert_eq!(results.groups[0].module_id, "sugestões por palavra");
     assert_eq!(results.groups[0].kind, LexKind::Strong);
     assert_eq!(results.groups[0].hits[0].key, "G25");
@@ -182,7 +194,10 @@ fn integrates_reverse_suggestions_into_lexicon_search() -> Result<(), LexiconErr
         .provenance
         .as_deref()
         .is_some_and(|p| p.starts_with("reverse_index")));
-    assert_eq!(results.groups[1].module_id, "glossario.dct.twm");
-    assert_eq!(results.groups[1].hits[0].field, MatchField::Body);
+    assert_eq!(results.groups[1].module_id, "ligados a G25");
+    assert_eq!(results.groups[1].hits[0].key, "25.43");
+    assert_eq!(results.groups[1].hits[0].field, MatchField::Link);
+    assert_eq!(results.groups[2].module_id, "glossario.dct.twm");
+    assert_eq!(results.groups[2].hits[0].field, MatchField::Body);
     Ok(())
 }
