@@ -47,12 +47,12 @@ fn indexes_single_phrase_multi_tags_repeats_and_language_filter() {
         "Sintética PT",
         "pt",
         &[
-            // Mt 1:1 (idx 0): palavra única, repetição do mesmo Strong (n=2) e número/1-letra ignorados
-            (0, "luz<WG25> a<WG25> 123<WG25> brilha<WG25> forte"),
-            // Mt 1:2 (idx 1): trecho etiquetado (tag sobre grupo itálico) e múltiplas tags na mesma palavra
+            // Mt 1:1 (idx 0): palavra única, repetição do mesmo Strong (n=4) e número/1-letra ignorados
+            (0, "luz<WG25> a<WG25> 123<WG25> luz<WG25> forte"),
+            // Mt 1:2 (idx 1): tag dentro de itálico e múltiplas tags na mesma palavra
             (1, "<i>grande estrela</i><WG3056> vento<WG25><WG26> calmo"),
-            // Mt 1:3 (idx 2): acento dobrado (fold_latin)
-            (2, "ação<WG25> clara"),
+            // Mt 1:3 (idx 2): acento dobrado (fold_latin) com repetição
+            (2, "ação<WG25> ação<WG25> vento<WG25> clara"),
         ],
     );
 
@@ -99,16 +99,16 @@ fn indexes_single_phrase_multi_tags_repeats_and_language_filter() {
     assert!(idx.occurrences("G25", None, 201, 50).is_err());
 
     // G25 na Bíblia PT (preferida por ser 'por'):
-    // idx 0 -> 4 tags G25 (n=4), idx 1 -> 1 tag G25 (n=1), idx 2 -> 1 tag G25 (n=1) => 3 versículos, 6 ocorrências
+    // idx 0 -> 4 tags G25 (n=4), idx 1 -> 1 tag G25 (n=1), idx 2 -> 3 tags G25 (n=3) => 3 versículos, 8 ocorrências
     let res = idx.occurrences("G25", Some("sint_pt.nt"), 1, 2).unwrap();
     assert_eq!(res.strong, "G25");
     assert_eq!(res.selected_module_id.as_deref(), Some("sint_pt.nt"));
     assert_eq!(res.total_verses, 3);
-    assert_eq!(res.total_occurrences, 6);
+    assert_eq!(res.total_occurrences, 8);
     assert_eq!(res.by_book.len(), 1);
     assert_eq!(res.by_book[0].book, 40);
     assert_eq!(res.by_book[0].verses, 3);
-    assert_eq!(res.by_book[0].occurrences, 6);
+    assert_eq!(res.by_book[0].occurrences, 8);
     assert_eq!(res.total_pages, 2);
     assert_eq!(res.items.len(), 2);
     assert_eq!(
@@ -129,7 +129,6 @@ fn indexes_single_phrase_multi_tags_repeats_and_language_filter() {
     let tr_pt = idx.translations("G25", Some("sint_pt.nt"), 10).unwrap();
     let words: Vec<&str> = tr_pt.items.iter().map(|i| i.word.as_str()).collect();
     assert!(words.contains(&"luz"));
-    assert!(words.contains(&"brilha"));
     assert!(words.contains(&"vento"));
     assert!(words.contains(&"acao"));
     assert!(!words.contains(&"a"));
@@ -213,6 +212,45 @@ fn invalidates_when_module_changes_and_builds_together_with_reverse() {
     );
     let err = OccurrencesIndex::open(&occ_path).err().unwrap();
     assert!(matches!(err, LexiconError::RebuildRequired(_)));
+}
+
+#[test]
+fn ranks_translations_by_dice_and_filters_short_or_singleton_words() {
+    let dir = tempdir().unwrap();
+    let mods = dir.path().join("mods");
+    fs::create_dir(&mods).unwrap();
+
+    // Palavra de ligação "que" aparece muitas vezes em outros Strongs (n_w alto) e 3x em G25,
+    // enquanto "brilha" aparece 2x exclusivamente em G25 -> Dice de "brilha" deve vencer "que".
+    // Palavra de 2 letras ("de") é descartada; palavra com n_ws=1 ("rara") é descartada quando há outras,
+    // mas mantida quando é a única (G99 -> "unico").
+    let mut verses: Vec<(usize, String)> = vec![
+        (0, "que<WG25> de<WG25> brilha<WG25>".into()),
+        (1, "que<WG25> de<WG25> brilha<WG25>".into()),
+        (2, "que<WG25> de<WG25> rara<WG25>".into()),
+        (3, "unico<WG99>".into()),
+    ];
+    for i in 4..24 {
+        verses.push((i, "que<WG100>".into()));
+    }
+    let refs: Vec<(usize, &str)> = verses.iter().map(|(i, s)| (*i, s.as_str())).collect();
+    write_synthetic_nt(&mods.join("dice_pt.nt"), "Dice PT", "pt", &refs);
+
+    let db_path = dir.path().join("occ-dice.sqlite");
+    build_occurrences_index(&db_path, std::slice::from_ref(&mods)).unwrap();
+    let idx = OccurrencesIndex::open(&db_path).unwrap();
+
+    let tr = idx.translations("G25", Some("dice_pt.nt"), 10).unwrap();
+    let words: Vec<&str> = tr.items.iter().map(|i| i.word.as_str()).collect();
+    assert_eq!(words, vec!["brilha", "que"]);
+    assert_eq!(tr.items[0].n, 2);
+    assert_eq!(tr.items[1].n, 3);
+
+    // Quando há apenas uma candidata com n_ws = 1, ela é mantida
+    let tr_single = idx.translations("G99", Some("dice_pt.nt"), 10).unwrap();
+    assert_eq!(tr_single.items.len(), 1);
+    assert_eq!(tr_single.items[0].word, "unico");
+    assert_eq!(tr_single.items[0].n, 1);
 }
 
 #[test]

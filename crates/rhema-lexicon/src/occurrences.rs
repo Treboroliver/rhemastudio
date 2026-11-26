@@ -16,7 +16,7 @@ use crate::reverse::{
 use crate::{fold_latin, LexiconError};
 
 const APPLICATION_ID: i32 = 0x524F4343;
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 2;
 
 /// Idiomas ativos por padrão no índice de ocorrências.
 pub const DEFAULT_ACTIVE_LANGUAGES: [&str; 3] = ["por", "grc", "heb"];
@@ -779,6 +779,10 @@ fn build_bible_indexes_inner(
             entry.0 += 1;
             entry.1 += *n;
         }
+        let mut word_totals: HashMap<String, u64> = HashMap::new();
+        for ((_, word), n) in &occ_translations {
+            *word_totals.entry(word.clone()).or_insert(0) += *n;
+        }
 
         let write_res: Result<(), LexiconError> = (|| {
             let tx = occ_db.transaction()?;
@@ -834,6 +838,13 @@ fn build_bible_indexes_inner(
                     stmt.execute(params![strong, id, word, *n as i64])?;
                 }
             }
+            {
+                let mut stmt =
+                    tx.prepare("INSERT INTO word_totals(module_id, word, n_w) VALUES (?1,?2,?3)")?;
+                for (word, n_w) in &word_totals {
+                    stmt.execute(params![id, word, *n_w as i64])?;
+                }
+            }
             tx.commit()?;
             Ok(())
         })();
@@ -869,7 +880,12 @@ fn build_bible_indexes_inner(
         )
     });
 
+    let idx_res = occ_db.execute_batch("CREATE INDEX idx_occ_wt_word ON word_totals(word);");
     drop(occ_db);
+    if let Err(err) = idx_res {
+        let _ = fs::remove_file(&occ_tmp);
+        return Err(err.into());
+    }
 
     if let Err(err) = fs::rename(&occ_tmp, occurrences_path) {
         let _ = fs::remove_file(&occ_tmp);
@@ -933,6 +949,12 @@ fn init_occurrences_schema(db: &Connection) -> Result<(), LexiconError> {
              word TEXT NOT NULL,
              n INTEGER NOT NULL,
              PRIMARY KEY(strong, module_id, word)
+         ) WITHOUT ROWID;
+         CREATE TABLE word_totals(
+             module_id TEXT NOT NULL,
+             word TEXT NOT NULL,
+             n_w INTEGER NOT NULL,
+             PRIMARY KEY(module_id, word)
          ) WITHOUT ROWID;"
     ))?;
     Ok(())
@@ -1142,7 +1164,9 @@ impl OccurrencesIndex {
         })
     }
 
-    /// Consulta as palavras traduzidas mais usadas para um Strong (em uma Bíblia ou somando todas).
+    /// Consulta as palavras traduzidas mais usadas para um Strong (em uma Bíblia ou somando todas),
+    /// ranqueadas por proporção (Dice = 2*n_ws/(n_w+n_s)), descartando palavras de 1–2 letras e
+    /// contagens `n_ws < 2` (exceto quando for a única candidata).
     pub fn translations(
         &self,
         strong: &str,
@@ -1152,13 +1176,15 @@ impl OccurrencesIndex {
         let strong = validate_strong_number(strong)?;
         let limit = limit.clamp(1, 100);
 
-        let (total, items) = if let Some(mid) = module_id.map(str::trim).filter(|s| !s.is_empty()) {
+        let (total, raw_rows) = if let Some(mid) =
+            module_id.map(str::trim).filter(|s| !s.is_empty())
+        {
             let total: u64 = self
                 .db
                 .prepare_cached(
-                    "SELECT COALESCE(SUM(n), 0) FROM translations WHERE module_id = ?1 AND strong = ?2",
+                    "SELECT COALESCE(SUM(n), 0) FROM translations WHERE strong = ?1 AND module_id = ?2",
                 )?
-                .query_row(params![mid, &strong], |r| r.get::<_, i64>(0))?
+                .query_row(params![&strong, mid], |r| r.get::<_, i64>(0))?
                 .max(0) as u64;
             if total == 0 {
                 return Ok(StrongTranslationsResult {
@@ -1169,18 +1195,18 @@ impl OccurrencesIndex {
                 });
             }
             let mut stmt = self.db.prepare_cached(
-                "SELECT word, n FROM translations
-                 WHERE module_id = ?1 AND strong = ?2
-                 ORDER BY n DESC, word ASC
-                 LIMIT ?3",
+                "SELECT t.word, t.n, COALESCE(wt.n_w, t.n)
+                 FROM translations t
+                 LEFT JOIN word_totals wt ON wt.module_id = t.module_id AND wt.word = t.word
+                 WHERE t.strong = ?1 AND t.module_id = ?2",
             )?;
-            let mut rows = stmt.query(params![mid, &strong, limit as i64])?;
+            let mut rows = stmt.query(params![&strong, mid])?;
             let mut out = Vec::new();
             while let Some(row) = rows.next()? {
                 let word: String = row.get(0)?;
-                let n = row.get::<_, i64>(1)?.max(0) as u64;
-                let percent = (n as f64 / total as f64) * 100.0;
-                out.push(TranslationCount { word, n, percent });
+                let n_ws = row.get::<_, i64>(1)?.max(0) as u64;
+                let n_w = row.get::<_, i64>(2)?.max(0) as u64;
+                out.push((word, n_ws, n_w));
             }
             (total, out)
         } else {
@@ -1198,28 +1224,58 @@ impl OccurrencesIndex {
                 });
             }
             let mut stmt = self.db.prepare_cached(
-                "SELECT word, SUM(n) AS total_n FROM translations
-                 WHERE strong = ?1
-                 GROUP BY word
-                 ORDER BY total_n DESC, word ASC
-                 LIMIT ?2",
+                "SELECT t.word,
+                        SUM(t.n) AS total_ws,
+                        (SELECT COALESCE(SUM(wt.n_w), 0) FROM word_totals wt WHERE wt.word = t.word) AS total_w
+                 FROM translations t
+                 WHERE t.strong = ?1
+                 GROUP BY t.word",
             )?;
-            let mut rows = stmt.query(params![&strong, limit as i64])?;
+            let mut rows = stmt.query([&strong])?;
             let mut out = Vec::new();
             while let Some(row) = rows.next()? {
                 let word: String = row.get(0)?;
-                let n = row.get::<_, i64>(1)?.max(0) as u64;
-                let percent = (n as f64 / total as f64) * 100.0;
-                out.push(TranslationCount { word, n, percent });
+                let n_ws = row.get::<_, i64>(1)?.max(0) as u64;
+                let n_w = row.get::<_, i64>(2)?.max(0) as u64;
+                out.push((word, n_ws, n_w));
             }
             (total, out)
         };
+
+        let mut candidates: Vec<(TranslationCount, f64)> = raw_rows
+            .into_iter()
+            .filter(|(word, _, _)| word.chars().filter(|c| c.is_alphabetic()).count() >= 3)
+            .map(|(word, n_ws, n_w)| {
+                let denom = (n_w + total).max(1) as f64;
+                let dice = (2.0 * n_ws as f64) / denom;
+                let percent = (n_ws as f64 / total as f64) * 100.0;
+                (
+                    TranslationCount {
+                        word,
+                        n: n_ws,
+                        percent,
+                    },
+                    dice,
+                )
+            })
+            .collect();
+
+        if candidates.len() > 1 {
+            candidates.retain(|(item, _)| item.n >= 2);
+        }
+
+        candidates.sort_by(|(a, da), (b, db)| {
+            db.total_cmp(da)
+                .then_with(|| b.n.cmp(&a.n))
+                .then_with(|| a.word.cmp(&b.word))
+        });
+        candidates.truncate(limit);
 
         Ok(StrongTranslationsResult {
             strong,
             module_id: module_id.map(str::to_string),
             total,
-            items,
+            items: candidates.into_iter().map(|(item, _)| item).collect(),
         })
     }
 }

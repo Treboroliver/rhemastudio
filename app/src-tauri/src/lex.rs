@@ -1237,7 +1237,7 @@ mod tests {
         let p_bible = mods.join("sint_pt.nt");
         let mut lines: Vec<String> = vec![".".to_string(); 7957];
         lines[0] = "luz<WG25> brilha<WG25> forte".into();
-        lines[1] = "estrela<WG25> clara".into();
+        lines[1] = "luz<WG25> brilha<WG25> clara".into();
         let mut content = lines.join("\n");
         content.push_str("\ntitle=Biblia Sintetica\nshort.title=BSIN\nlang=pt\ncharset=65001\n");
         fs::write(&p_bible, content).unwrap();
@@ -1290,13 +1290,13 @@ mod tests {
         assert_eq!(occ.strong, "G25");
         assert_eq!(occ.selected_module_id.as_deref(), Some("bible-cat-1"));
         assert_eq!(occ.total_verses, 2);
-        assert_eq!(occ.total_occurrences, 3);
+        assert_eq!(occ.total_occurrences, 4);
         assert_eq!(occ.by_book.len(), 1);
         assert_eq!(occ.by_book[0].book, 40);
 
         let tr =
             strong_translations(&state, &catalog, "G25", Some("bible-cat-1"), Some(10)).unwrap();
-        assert_eq!(tr.total, 3);
-        assert_eq!(tr.items.len(), 3);
+        assert_eq!(tr.total, 4);
+        assert_eq!(tr.items.len(), 2);
     }
 }
