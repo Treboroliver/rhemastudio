@@ -90,6 +90,160 @@ pub fn tokenize_latin_words(text: &str) -> Vec<String> {
     tokens
 }
 
+pub(crate) fn collect_reverse_nodes(
+    nodes: &[Node],
+    active_strongs: &mut Vec<String>,
+    pairs: &mut HashMap<(String, String), u64>,
+    word_totals: &mut HashMap<String, u64>,
+    strong_totals: &mut HashMap<String, u64>,
+) {
+    collect_nodes(nodes, active_strongs, pairs, word_totals, strong_totals);
+}
+
+pub(crate) struct CollectedBibleReverse {
+    pub id: String,
+    pub path: String,
+    pub size: u64,
+    pub modified_ns: String,
+    pub verses_read: usize,
+    pub pairs: HashMap<(String, String), u64>,
+    pub word_totals: HashMap<String, u64>,
+    pub strong_totals: HashMap<String, u64>,
+    pub ms: u128,
+}
+
+pub(crate) fn build_reverse_from_collected(
+    cache_path: &Path,
+    collected: Vec<CollectedBibleReverse>,
+    protected_ignored: usize,
+    unreadable_modules: usize,
+    warnings: Vec<String>,
+    scan_ms: u128,
+    build_start: Instant,
+) -> Result<ReverseBuildReport, LexiconError> {
+    if collected.is_empty() {
+        return Err(LexiconError::Invalid(
+            "Nenhuma Bíblia legível com tags Strong encontrada".into(),
+        ));
+    }
+    if let Some(parent) = cache_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let tmp_path = cache_path.with_extension(format!("tmp.{}", now_nanos()));
+    let write_res: Result<Vec<BibleReverseStats>, LexiconError> = (|| {
+        let mut db = Connection::open_with_flags(
+            &tmp_path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
+        )?;
+        db.execute_batch(&format!(
+            "PRAGMA application_id={APPLICATION_ID};
+             PRAGMA user_version={SCHEMA_VERSION};
+             PRAGMA journal_mode=OFF;
+             PRAGMA synchronous=OFF;
+             CREATE TABLE modules(
+                 id TEXT PRIMARY KEY,
+                 path TEXT NOT NULL,
+                 size INTEGER NOT NULL,
+                 modified_ns TEXT NOT NULL,
+                 verses INTEGER NOT NULL,
+                 distinct_words INTEGER NOT NULL,
+                 pairs INTEGER NOT NULL
+             );
+             CREATE TABLE word_totals(
+                 module_id TEXT NOT NULL,
+                 word TEXT NOT NULL,
+                 n_w INTEGER NOT NULL,
+                 PRIMARY KEY(module_id, word)
+             );
+             CREATE TABLE strong_totals(
+                 module_id TEXT NOT NULL,
+                 strong TEXT NOT NULL,
+                 n_s INTEGER NOT NULL,
+                 PRIMARY KEY(module_id, strong)
+             );
+             CREATE TABLE cooccurrences(
+                 module_id TEXT NOT NULL,
+                 word TEXT NOT NULL,
+                 strong TEXT NOT NULL,
+                 n_ws INTEGER NOT NULL,
+                 PRIMARY KEY(module_id, word, strong)
+             );"
+        ))?;
+
+        let mut bibles = Vec::with_capacity(collected.len());
+        for item in collected {
+            let distinct_words = item.word_totals.len();
+            let pair_count = item.pairs.len();
+            let tx = db.transaction()?;
+            tx.execute(
+                "INSERT INTO modules VALUES (?1,?2,?3,?4,?5,?6,?7)",
+                params![
+                    item.id,
+                    item.path,
+                    item.size as i64,
+                    item.modified_ns,
+                    item.verses_read as i64,
+                    distinct_words as i64,
+                    pair_count as i64
+                ],
+            )?;
+            {
+                let mut stmt_w = tx.prepare("INSERT INTO word_totals VALUES (?1,?2,?3)")?;
+                for (word, n_w) in &item.word_totals {
+                    stmt_w.execute(params![item.id, word, *n_w as i64])?;
+                }
+            }
+            {
+                let mut stmt_s = tx.prepare("INSERT INTO strong_totals VALUES (?1,?2,?3)")?;
+                for (strong, n_s) in &item.strong_totals {
+                    stmt_s.execute(params![item.id, strong, *n_s as i64])?;
+                }
+            }
+            {
+                let mut stmt_c = tx.prepare("INSERT INTO cooccurrences VALUES (?1,?2,?3,?4)")?;
+                for ((word, strong), n_ws) in &item.pairs {
+                    stmt_c.execute(params![item.id, word, strong, *n_ws as i64])?;
+                }
+            }
+            tx.commit()?;
+            bibles.push(BibleReverseStats {
+                id: item.id,
+                path: item.path,
+                verses_read: item.verses_read,
+                distinct_words,
+                pairs: pair_count,
+                ms: item.ms,
+            });
+        }
+        db.execute_batch(
+            "CREATE INDEX idx_cooc_word ON cooccurrences(word);
+             CREATE INDEX idx_wt_word ON word_totals(word);
+             CREATE INDEX idx_st_strong ON strong_totals(strong);",
+        )?;
+        Ok(bibles)
+    })();
+
+    match write_res {
+        Ok(bibles) => {
+            fs::rename(&tmp_path, cache_path)?;
+            Ok(ReverseBuildReport {
+                cache_path: cache_path.to_string_lossy().into_owned(),
+                bibles,
+                protected_ignored,
+                unreadable_modules,
+                warnings,
+                scan_ms,
+                build_ms: build_start.elapsed().as_millis(),
+                database_bytes: fs::metadata(cache_path)?.len(),
+            })
+        }
+        Err(error) => {
+            let _ = fs::remove_file(&tmp_path);
+            Err(error)
+        }
+    }
+}
+
 fn collect_nodes(
     nodes: &[Node],
     active_strongs: &mut Vec<String>,

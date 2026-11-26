@@ -123,6 +123,78 @@ export interface LexRelatedDto {
   related: LexRelatedItemDto[]
 }
 
+export interface OccurrenceBibleDto {
+  module_id: string
+  title: string
+  abbreviation: string | null
+  lang: string
+  total_verses: number
+  total_occurrences: number
+}
+
+export interface BookOccurrenceCount {
+  book: number
+  verses: number
+  occurrences: number
+}
+
+export interface VerseOccurrence {
+  book: number
+  chapter: number
+  verse: number
+  n: number
+}
+
+export interface StrongOccurrencesDto {
+  strong: string
+  selected_module_id: string | null
+  bibles: OccurrenceBibleDto[]
+  total_verses: number
+  total_occurrences: number
+  by_book: BookOccurrenceCount[]
+  page: number
+  page_size: number
+  total_pages: number
+  items: VerseOccurrence[]
+}
+
+export interface TranslationCount {
+  word: string
+  n: number
+  percent: number
+}
+
+export interface StrongTranslationsDto {
+  strong: string
+  module_id: string | null
+  total: number
+  items: TranslationCount[]
+}
+
+export const strongOccurrences = (
+  strong: string,
+  moduleId?: string | null,
+  page?: number,
+  pageSize?: number
+) =>
+  invoke<StrongOccurrencesDto>('strong_occurrences', {
+    strong,
+    moduleId: moduleId ?? null,
+    page: page ?? 1,
+    pageSize: pageSize ?? 50
+  })
+
+export const strongTranslations = (
+  strong: string,
+  moduleId?: string | null,
+  limit?: number
+) =>
+  invoke<StrongTranslationsDto>('strong_translations', {
+    strong,
+    moduleId: moduleId ?? null,
+    limit: limit ?? 15
+  })
+
 export const lookupStrong = (strongId: string) =>
   invoke<LexiconEntryDto>('lookup_strong', { strongId })
 

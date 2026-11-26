@@ -502,9 +502,24 @@
     studyTab = 'lexicon'
   }
 
-  function openVerse(target: { book: number; chapter: number; verse: number }) {
+  async function openVerse(target: { book: number; chapter: number; verse: number; moduleId?: string }) {
     const book = books.find((candidate) => candidate.number === target.book)
     if (!book || target.chapter < 1 || target.chapter > book.chapters || target.verse < 1) return
+    if (target.moduleId) {
+      const mod = readyBibles.find((m) => m.id === target.moduleId)
+      if (mod) {
+        if (selectedBibleIds.includes(mod.id)) {
+          await activateBible(mod.id)
+        } else if (selectedBibleIds.length < 4) {
+          await selectBible(mod)
+        } else {
+          const next = [...selectedBibleIds]
+          const idx = activeBibleId ? next.indexOf(activeBibleId) : 0
+          next[idx >= 0 ? idx : 0] = mod.id
+          await updateColumns(next, mod.id)
+        }
+      }
+    }
     navigate({ book: target.book, chapter: target.chapter, verse: target.verse })
   }
 

@@ -5,8 +5,9 @@ use std::sync::{Arc, Mutex};
 
 use rhema_core::ModuleKind;
 use rhema_lexicon::{
-    LexKind, LexiconError, LexiconIndex, MatchField, SearchFilters, SearchResults, build_index,
-    build_links, build_reverse_index,
+    BookOccurrenceCount, LexKind, LexiconError, LexiconIndex, MatchField, OccurrenceBibleInfo,
+    OccurrencesIndex, SearchFilters, SearchResults, TranslationCount, VerseOccurrence, build_index,
+    build_links, build_reverse_and_occurrences, validate_strong_number,
 };
 use rhema_library::{ModuleInfo, ModuleState};
 use serde::Serialize;
@@ -34,6 +35,7 @@ pub struct LexState {
     building: Mutex<bool>,
     progress: Mutex<BuildProgressState>,
     index: Mutex<Option<Arc<LexiconIndex>>>,
+    occurrences: Mutex<Option<OccurrencesIndex>>,
 }
 
 impl LexState {
@@ -43,6 +45,7 @@ impl LexState {
             building: Mutex::new(false),
             progress: Mutex::new(BuildProgressState::default()),
             index: Mutex::new(None),
+            occurrences: Mutex::new(None),
         }
     }
 
@@ -56,6 +59,10 @@ impl LexState {
 
     fn reverse_path(&self) -> PathBuf {
         self.data_dir.join("reverse.sqlite")
+    }
+
+    fn occurrences_path(&self) -> PathBuf {
+        self.data_dir.join("occurrences.sqlite")
     }
 
     fn is_building(&self) -> bool {
@@ -82,8 +89,28 @@ impl LexState {
         Ok(arc)
     }
 
+    fn with_occurrences<T>(
+        &self,
+        f: impl FnOnce(&OccurrencesIndex) -> Result<T, LexiconError>,
+    ) -> Result<T, LexiconError> {
+        let mut guard = self
+            .occurrences
+            .lock()
+            .map_err(|_| LexiconError::Invalid("estado de ocorrências indisponível".into()))?;
+        if guard.is_none() {
+            *guard = Some(OccurrencesIndex::open(self.occurrences_path())?);
+        }
+        let idx = guard
+            .as_ref()
+            .ok_or_else(|| LexiconError::Invalid("índice de ocorrências indisponível".into()))?;
+        f(idx)
+    }
+
     pub fn invalidate_cache(&self) {
         if let Ok(mut guard) = self.index.lock() {
+            *guard = None;
+        }
+        if let Ok(mut guard) = self.occurrences.lock() {
             *guard = None;
         }
     }
@@ -161,6 +188,38 @@ pub struct LexSearchDto {
     pub interpretations: Vec<String>,
     pub groups: Vec<LexSearchGroupDto>,
     pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct OccurrenceBibleDto {
+    pub module_id: String,
+    pub title: String,
+    pub abbreviation: Option<String>,
+    pub lang: String,
+    pub total_verses: u64,
+    pub total_occurrences: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct StrongOccurrencesDto {
+    pub strong: String,
+    pub selected_module_id: Option<String>,
+    pub bibles: Vec<OccurrenceBibleDto>,
+    pub total_verses: u64,
+    pub total_occurrences: u64,
+    pub by_book: Vec<BookOccurrenceCount>,
+    pub page: u32,
+    pub page_size: u32,
+    pub total_pages: u32,
+    pub items: Vec<VerseOccurrence>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct StrongTranslationsDto {
+    pub strong: String,
+    pub module_id: Option<String>,
+    pub total: u64,
+    pub items: Vec<TranslationCount>,
 }
 
 fn ready_dictionaries(catalog: &[ModuleInfo]) -> Vec<&ModuleInfo> {
@@ -244,6 +303,21 @@ pub fn index_status(state: &LexState, catalog: &[ModuleInfo]) -> LexIndexStatusD
                     module_id: None,
                     entries_processed: 0,
                     message: status.message(),
+                }
+            } else if catalog
+                .iter()
+                .any(|m| m.kind == ModuleKind::Bible && m.state == ModuleState::Ready)
+                && state.with_occurrences(|_| Ok(())).is_err()
+            {
+                LexIndexStatusDto {
+                    state: "rebuild_needed".into(),
+                    stage: None,
+                    module_index: 0,
+                    module_count: 0,
+                    percent: 0,
+                    module_id: None,
+                    entries_processed: 0,
+                    message: Some("Índice de ocorrências precisa ser construído.".into()),
                 }
             } else {
                 LexIndexStatusDto {
@@ -383,6 +457,9 @@ where
         }
     };
 
+    // Libera conexões SQLite abertas antes de substituir arquivos (evita bloqueio no Windows)
+    state.invalidate_cache();
+
     // Etapa 1: ligações (opcional se não houver módulo Strong)
     update_progress(state, emit, mk("links", 0, 1, 5, None, 0));
     let links_tmp = state.data_dir.join("links.sqlite.tmp");
@@ -418,10 +495,17 @@ where
     })
     .map_err(|e| ApiError::new("lex_build_failed", e.to_string()))?;
 
-    // Etapa 3: índice reverso palavra -> Strong (opcional se não houver Bíblias com Strong)
+    // Etapa 3: índice reverso + índice de ocorrências na mesma varredura de Bíblias
     update_progress(state, emit, mk("reverse", 0, 1, 85, None, 0));
-    if let Err(err) = build_reverse_index(state.reverse_path(), folders) {
-        log::info!("build_reverse_index ignorado: {err}");
+    match build_reverse_and_occurrences(state.reverse_path(), state.occurrences_path(), folders) {
+        Ok((rev_res, _occ_rep)) => {
+            if let Err(err) = rev_res {
+                log::info!("build_reverse_index ignorado: {err}");
+            }
+        }
+        Err(err) => {
+            log::info!("build_reverse_and_occurrences ignorado: {err}");
+        }
     }
 
     // Reabre e atualiza os handles em cache
@@ -429,6 +513,7 @@ where
     state
         .cached_or_open()
         .map_err(|e| ApiError::internal(format!("Erro ao abrir índice construído: {e}")))?;
+    let _ = state.with_occurrences(|_| Ok(()));
     Ok(())
 }
 
@@ -766,6 +851,206 @@ pub fn related_for(
     Ok(LexRelatedDto { primary, related })
 }
 
+fn find_catalog_bible<'a>(
+    catalog: &'a [ModuleInfo],
+    info: &OccurrenceBibleInfo,
+) -> Option<&'a ModuleInfo> {
+    let info_canon = fs::canonicalize(&info.path).ok();
+    let info_name = Path::new(&info.path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase());
+    catalog.iter().find(|m| {
+        if m.kind != ModuleKind::Bible {
+            return false;
+        }
+        if m.id == info.module_id {
+            return true;
+        }
+        if let (Some(a), Ok(b)) = (info_canon.as_ref(), fs::canonicalize(&m.path))
+            && *a == b
+        {
+            return true;
+        }
+        info_name.as_deref().is_some_and(|name| {
+            m.path
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().to_lowercase() == name)
+        })
+    })
+}
+
+fn resolve_db_module_id(
+    catalog: &[ModuleInfo],
+    bibles: &[OccurrenceBibleInfo],
+    requested: Option<&str>,
+) -> Option<String> {
+    let req = requested?.trim();
+    if req.is_empty() {
+        return None;
+    }
+    if let Some(b) = bibles.iter().find(|b| b.module_id == req) {
+        return Some(b.module_id.clone());
+    }
+    if let Some(cat_mod) = catalog.iter().find(|m| m.id == req) {
+        let cat_canon = fs::canonicalize(&cat_mod.path).ok();
+        let cat_name = cat_mod
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_lowercase());
+        if let Some(b) = bibles.iter().find(|b| {
+            if let (Some(a), Ok(bp)) = (cat_canon.as_ref(), fs::canonicalize(&b.path))
+                && *a == bp
+            {
+                return true;
+            }
+            cat_name.as_deref().is_some_and(|name| {
+                Path::new(&b.path)
+                    .file_name()
+                    .is_some_and(|n| n.to_string_lossy().to_lowercase() == name)
+            })
+        }) {
+            return Some(b.module_id.clone());
+        }
+    }
+    Some(req.to_string())
+}
+
+pub fn strong_occurrences(
+    state: &LexState,
+    catalog: &[ModuleInfo],
+    strong: &str,
+    module_id: Option<&str>,
+    page: Option<u32>,
+    page_size: Option<u32>,
+) -> Result<StrongOccurrencesDto, ApiError> {
+    let strong = validate_strong_number(strong)
+        .map_err(|e| ApiError::new("invalid_strong", e.to_string()))?;
+    let page = page.unwrap_or(1);
+    if !(1..=200).contains(&page) {
+        return Err(ApiError::new(
+            "invalid_page",
+            "A página deve estar entre 1 e 200.",
+        ));
+    }
+    let page_size = page_size.unwrap_or(50).clamp(1, 200);
+    if state.is_building() {
+        return Err(ApiError::new(
+            "lex_index_building",
+            "O índice está sendo construído.",
+        ));
+    }
+
+    let result = state
+        .with_occurrences(|idx| {
+            let bibles = idx.bibles_for_strong(&strong)?;
+            let db_mid = resolve_db_module_id(catalog, &bibles, module_id);
+            idx.occurrences(&strong, db_mid.as_deref(), page, page_size)
+        })
+        .map_err(|e| match e {
+            LexiconError::RebuildRequired(_) => ApiError::new(
+                "lex_rebuild_required",
+                "O índice de ocorrências precisa ser reconstruído.",
+            ),
+            LexiconError::Invalid(msg) => ApiError::new("invalid_argument", msg),
+            other => ApiError::internal(other.to_string()),
+        })?;
+
+    let mut id_map: HashMap<String, String> = HashMap::new();
+    let bibles: Vec<OccurrenceBibleDto> = result
+        .bibles
+        .iter()
+        .map(|b| {
+            let cat = find_catalog_bible(catalog, b);
+            let mapped_id = cat
+                .map(|m| m.id.clone())
+                .unwrap_or_else(|| b.module_id.clone());
+            id_map.insert(b.module_id.clone(), mapped_id.clone());
+            OccurrenceBibleDto {
+                module_id: mapped_id,
+                title: cat
+                    .map(|m| m.title.clone())
+                    .unwrap_or_else(|| b.title.clone()),
+                abbreviation: cat
+                    .and_then(|m| m.abbreviation.clone())
+                    .or_else(|| b.abbreviation.clone()),
+                lang: b.lang.clone(),
+                total_verses: b.total_verses,
+                total_occurrences: b.total_occurrences,
+            }
+        })
+        .collect();
+
+    let selected_module_id = result
+        .selected_module_id
+        .map(|db_id| id_map.get(&db_id).cloned().unwrap_or(db_id));
+
+    Ok(StrongOccurrencesDto {
+        strong: result.strong,
+        selected_module_id,
+        bibles,
+        total_verses: result.total_verses,
+        total_occurrences: result.total_occurrences,
+        by_book: result.by_book,
+        page: result.page,
+        page_size: result.page_size,
+        total_pages: result.total_pages,
+        items: result.items,
+    })
+}
+
+pub fn strong_translations(
+    state: &LexState,
+    catalog: &[ModuleInfo],
+    strong: &str,
+    module_id: Option<&str>,
+    limit: Option<usize>,
+) -> Result<StrongTranslationsDto, ApiError> {
+    let strong = validate_strong_number(strong)
+        .map_err(|e| ApiError::new("invalid_strong", e.to_string()))?;
+    let limit = match limit {
+        Some(n) if n == 0 || n > MAX_LIMIT => {
+            return Err(ApiError::new(
+                "invalid_limit",
+                "O limite deve estar entre 1 e 100.",
+            ));
+        }
+        Some(n) => n,
+        None => 15,
+    };
+    if state.is_building() {
+        return Err(ApiError::new(
+            "lex_index_building",
+            "O índice está sendo construído.",
+        ));
+    }
+
+    let result = state
+        .with_occurrences(|idx| {
+            let db_mid = if module_id.is_some() {
+                let bibles = idx.bibles_for_strong(&strong)?;
+                resolve_db_module_id(catalog, &bibles, module_id)
+            } else {
+                None
+            };
+            idx.translations(&strong, db_mid.as_deref(), limit)
+        })
+        .map_err(|e| match e {
+            LexiconError::RebuildRequired(_) => ApiError::new(
+                "lex_rebuild_required",
+                "O índice de ocorrências precisa ser reconstruído.",
+            ),
+            LexiconError::Invalid(msg) => ApiError::new("invalid_argument", msg),
+            other => ApiError::internal(other.to_string()),
+        })?;
+
+    Ok(StrongTranslationsDto {
+        strong: result.strong,
+        module_id: module_id.map(str::to_string),
+        total: result.total,
+        items: result.items,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -939,5 +1224,79 @@ mod tests {
         let missing = dir.path().join("nao_existe");
         assert!(build_all_indexes(&state, &[missing], &mut |_| {}).is_err());
         assert!(!state.index_dir().join("CURRENT").exists());
+    }
+
+    #[test]
+    fn strong_occurrences_and_translations_work_and_validate_inputs() {
+        let dir = tempdir().unwrap();
+        let mods = dir.path().join("mods");
+        fs::create_dir(&mods).unwrap();
+        let p_dict = mods.join("strong_amg.dct.twm");
+        generate_synthetic_study_dictionary_twm(&p_dict).unwrap();
+
+        let p_bible = mods.join("sint_pt.nt");
+        let mut lines: Vec<String> = vec![".".to_string(); 7957];
+        lines[0] = "luz<WG25> brilha<WG25> forte".into();
+        lines[1] = "estrela<WG25> clara".into();
+        let mut content = lines.join("\n");
+        content.push_str("\ntitle=Biblia Sintetica\nshort.title=BSIN\nlang=pt\ncharset=65001\n");
+        fs::write(&p_bible, content).unwrap();
+
+        let mut bible_info = info_for(
+            "bible-cat-1",
+            p_bible,
+            "Biblia Sintetica",
+            ModuleState::Ready,
+        );
+        bible_info.kind = ModuleKind::Bible;
+        bible_info.has_strong = true;
+
+        let catalog = vec![
+            info_for("id-dict", p_dict, "Dicionario", ModuleState::Ready),
+            bible_info,
+        ];
+
+        let state = LexState::new(&dir.path().join("appdata"));
+        build_all_indexes(&state, std::slice::from_ref(&mods), &mut |_| {}).unwrap();
+
+        // Validações
+        assert_eq!(
+            strong_occurrences(&state, &catalog, "X99", None, None, None)
+                .unwrap_err()
+                .code,
+            "invalid_strong"
+        );
+        assert_eq!(
+            strong_occurrences(&state, &catalog, "G25", None, Some(0), None)
+                .unwrap_err()
+                .code,
+            "invalid_page"
+        );
+        assert_eq!(
+            strong_occurrences(&state, &catalog, "G25", None, Some(201), None)
+                .unwrap_err()
+                .code,
+            "invalid_page"
+        );
+        assert_eq!(
+            strong_translations(&state, &catalog, "G25", None, Some(0))
+                .unwrap_err()
+                .code,
+            "invalid_limit"
+        );
+
+        // Consulta mapeia module_id para o ID do catálogo
+        let occ = strong_occurrences(&state, &catalog, "g25", None, Some(1), Some(10)).unwrap();
+        assert_eq!(occ.strong, "G25");
+        assert_eq!(occ.selected_module_id.as_deref(), Some("bible-cat-1"));
+        assert_eq!(occ.total_verses, 2);
+        assert_eq!(occ.total_occurrences, 3);
+        assert_eq!(occ.by_book.len(), 1);
+        assert_eq!(occ.by_book[0].book, 40);
+
+        let tr =
+            strong_translations(&state, &catalog, "G25", Some("bible-cat-1"), Some(10)).unwrap();
+        assert_eq!(tr.total, 3);
+        assert_eq!(tr.items.len(), 3);
     }
 }

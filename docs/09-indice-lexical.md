@@ -1,12 +1,14 @@
 # E1a.1 — Núcleo lexical
 
 ## Normalização e consulta
+
 - Grego: NFD, remove marcas combinantes, minúsculas e sigma final → sigma comum.
 - Hebraico: NFD, remove marcas, maqqef, asterisco e direcionalidade; normaliza cinco letras finais.
 - Latim: NFD, remove marcas e aplica minúsculas; identificação de escrita distingue grego, hebraico, latim, misto e ausência.
 - `lex parse`: Strong `G25`, `g 25`, `H0430`; domínio/entrada `25`, `25.43`; DITAT/TWOT prefixado ou `57a`; palavras gregas, hebraicas e latinas. `25` retorna as duas interpretações numéricas.
 
 ## Extração e segurança
+
 - Strong: chave numérica, `strong_orig_word`, primeiro parêntese e números de listas após a palavra estrutural “de”.
 - Louw-Nida: inteiro = domínio; decimal = domínio e entrada; subdomínio é o identificador alfabético do cabeçalho, quando presente. Nas dez estruturas mascaradas de 300 caracteres, o cabeçalho lexical aparece após o rótulo de subdomínio e a faixa decimal entre parênteses, ou o marcador de traços; termina no primeiro trecho alfabético não grego. Ponto e vírgula separa lexemas; vírgula introduz informação gramatical, não um lexema novo. Quando não identifica a estrutura, não extrai do corpo.
 - DITAT: número/letra inicial, primeira palavra hebraica da chave, transliteração e números H contíguos ao cabeçalho; extrai subentradas numeradas com seu lema e H.
@@ -14,6 +16,7 @@
 - Não persiste texto de verbete; conteúdo é resolvido por linha e formato padrão. SQLite de módulo é somente leitura, com verificação de proteção antes de conteúdo; falhas e entradas indisponíveis são reportadas.
 
 ## Ligações
+
 - Strong → DITAT: `citado no verbete`; `lemma_agrees` compara lemas hebraicos dobrados. As subentradas preservam tanto seu número quanto a chave do verbete pai.
 - Strong → Louw-Nida: `lema no cabeçalho`, somente igualdade com lexema extraído; não usa o corpo.
 - Strong ↔ DITNT: `lema igual`, por igualdade de lema grego; consulta reversa disponível na API.
@@ -25,14 +28,14 @@
 Execução release com `RHEMA_TEST_MODULES=E:\coding\modulos-teste`; 4 módulos reconhecidos, 14198 Strong, protegido ignorado. Varredura 94 ms; construção 11623 ms; SQLite 5591040 bytes. Tempos dependem da máquina.
 
 | Medida | Resultado |
-|---|---|
+| --- | --- |
 | Ligações | DITAT 6301; Louw-Nida 7067; DITNT 715; 19 cabeçalhos decimais não reconhecidos; 0 verbetes indisponíveis. |
 | DITAT, cabeçalho principal | 2347 entradas com H ligado; 1987 têm ao menos uma igualdade (84,66%), 1883 somente iguais; 2002/2499 pares iguais (80,11%). Subentradas não entram nesse denominador. |
 | DITNT | 259/309 chaves contendo grego ligam-se a pelo menos um Strong (83,82%); a extração considera cada palavra grega da chave. |
 | Louw-Nida | Amostra reproduzível de 200 Strong gregos: 169 com ligação, 227 pares, média 1,135 entrada por lema; E0b usou o corpo inteiro e mediu 11,285. |
 
 | Lema consultado (identificado por Strong) | Chaves Louw-Nida |
-|---|---|
+| --- | --- |
 | G25 | 25.104, 25.43, 25.44 |
 | G3056 | 13.115, 30.13, 33.100, 33.260, 33.51, 33.99, 56.7, 57.228, 89.18 |
 | G4102 | 31.102, 31.104, 31.43, 31.85, 31.88, 33.289 |
@@ -44,7 +47,7 @@ Execução release com `RHEMA_TEST_MODULES=E:\coding\modulos-teste`; 4 módulos 
 Classificação **heurística, não validação linguística**: escrita = igualdade após omitir letras de apoio; raiz/derivada = inclusão textual com diferença ≥2; forma = uma substituição; demais = indeterminada. Letras mascaradas, `H/número DITAT: forma da chave~forma Strong`; `+` separa palavras. Não promover candidatos a equivalências sem revisão especializada.
 
 | Categoria candidata | Cinco divergências mascaradas |
-|---|---|
+| --- | --- |
 | Vogais ou escrita | H3676/1007: xxxxxxx~xxxx; H3734/1031: xxxx~xxxxx; H489/104: xxxxxxx~xxxxxxx; H3755/1040: xxxxxx~xxxxxxx; H3758/1043: xxxxxxxxx~xxxxxxxx |
 | Raiz contra derivada | H3677/1006: xxxxxx~xxxxxx+xxxxxx; H3678/1007: xxxxxxx~xxxxxxx+xxxxxxx; H3731/1028: xxxxxxxxxx~xxxxxxxxx+xxxxxxxxx; H3730/1029: xxxxxxxxxx~xxxxxxxxx+xxxxxxxxx; H3847/1075: xxxxxx~xxxxxx+xxxxxx |
 | Forma diferente | H75/10: xxxxx~xxxxx; H3664/1000: xxxxxx~xxxxxx; H3697/1013: xxxxxx~xxxxxx; H3738/1037: xxx~xxxxxx; H3859/1082: xxxxx~xxxxx |
@@ -73,16 +76,14 @@ As taxas não demonstram equivalência semântica; as ligações preservam prove
 - **Integração e medições (release):** grupo `"sugestões por palavra"` (`reverse_index`) antes dos resultados por corpo. Construção: 5.514 ms, 13.299.712 bytes, 5 protegidas ignoradas (`ARA+`: 28.503 palavras, 75.644 pares; `kjv`: 12.413 palavras, 45.217 pares). `unigênito`→`G3439` (pos. 1, Dice 0,480), `amor`→`G26` (pos. 1, Dice 0,550; `G25` pos. 10), `graça`→`G5485` (pos. 1, Dice 0,525). Busca com sugestões (200 consultas): abertura 3,31 ms, p50 0,36 ms, p95 41,86 ms.
 
 ## E1b.2 — Busca léxica no app
-
 - **Núcleo:** `ReverseIndex` mantido aberto em `LexiconIndex` com índices `idx_wt_word`/`idx_st_strong` e `prepare_cached` reduziu o `p95` de `41,86 ms` para `6,59 ms` (máx. `10,87 ms`). As 3 primeiras sugestões Strong recebem grupos `"ligados a G<n>"` via `links_for_strong`.
 - **Tauri (`lex.rs`):** `lex_index_status`, `lex_index_build` (`spawn_blocking`, evento `lex-index-progress`, sem índice parcial), `lex_search` (consulta ≤200 chars, limite 1–100) e `lex_entry` (RTF/RVF/HTML/texto); reconstrução automática em segundo plano ao abrir e após `library_scan`.
-- **Interface (`Ctrl+K` e aba Léxico):** debounce de 120 ms, prioridade para referências bíblicas, prefixo `l `, sugestões G/H lado a lado com Dice, barra de status (`Índice pronto`/`Construindo %`/`Reconstrução necessária`) e botão `Reconstruir índice`.
-
+- **Interface (`Ctrl+K` e aba Léxico):** debounce de 120 ms, prioridade para referências bíblicas, prefixo `l`, sugestões G/H lado a lado com Dice, barra de status (`Índice pronto`/`Construindo %`/`Reconstrução necessária`) e botão `Reconstruir índice`.
 ## E1b.3 — Abertura por topic_id e títulos limpos
 - `INDEX_SCHEMA_VERSION = 2` guarda `topic_id` e aplica `clean_title`; `lookup_by_id` abre o verbete sem `key.trim()`, e `library_scan` tolera pastas ausentes (`library:warnings` + `Remover`).
-
 ## E1b.4 — Abertura universal, lemas comuns e relacionados
 - `DictionarySource::open` exige só `(id, subject)`, `rhema-library`/`twm.rs` aceitam `.dct.twm` com `type=2/3` (`topics` sem `bible_refs`), e `unknown` lê como texto simples (`100%` dos 10 módulos antes falhando). Genéricos (`v3`) indexam lemas gregos/hebraicos/mistos e refs Strong; `lex_related` + `"Outros dicionários (N)"` (`G25`: 6/3, `G3056`: 28/4, `H430`: 2/2; build 53.238 ms, 19,7 MB, p50 1,91 ms).
-
 ## E1b.5 — Links inline, zlib, meta, ocultos e erros de comentário
 - RTF `\field` isola `\fldrslt` sem `\par` interno e renderiza inline; `twm.rs` descomprime zlib (`compressed=1`), segue `config.type` → extensão e `content_type` → `config.content.type` → `user=1?rvf:rtf`, resolve atalhos `meta` (≤5 saltos, sem duplicar corpo no índice) e oculta `topics_flags.hidden=1` das listas/índice; erros de comentário exibem `"módulo · código"` e gravam em `lex-errors.log`.
+## E2a — Concordância por Strong
+- `occurrences.sqlite` (`WITHOUT ROWID`, tabelas `occurrences`, `book_counts` e `translations`, idiomas `por/grc/heb`, troca atômica na mesma varredura do reverso) + `strong_occurrences`/`strong_translations` + seção recolhível `Ocorrências` na aba Léxico. Release (6 Bíblias, 2 protegidas): build 25.642 ms, 64,7 MB, abertura 2,62 ms, 200 consultas p50 0,67 ms / p95 1,15 ms.

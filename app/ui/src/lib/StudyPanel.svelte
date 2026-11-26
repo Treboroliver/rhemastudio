@@ -22,7 +22,7 @@
     onTab: (tab: StudyTab) => void
     onToggleExpand?: () => void
     onToggleCommentary: (id: string, enabled: boolean) => void
-    onVerse: NonNullable<NodeActions['onVerse']>
+    onVerse: (target: { book: number; chapter: number; verse: number; moduleId?: string }) => void
     onEntry: (id: string) => void
     onManageFolders: () => void
     onEscape: () => void
@@ -131,7 +131,7 @@
     tabindex="-1"
     hidden={tab !== 'lexicon'}
   >
-    <LexiconTab {t} request={strongRequest} entryRequest={lexEntryRequest} active={open && tab === 'lexicon'} {onVerse} {onManageFolders} onInsert={onInsertLexicon} />
+    <LexiconTab {t} {books} request={strongRequest} entryRequest={lexEntryRequest} active={open && tab === 'lexicon'} {onVerse} {onManageFolders} onInsert={onInsertLexicon} />
   </div>
   <div
     class="study-body"

@@ -581,6 +581,46 @@ async fn lex_related(
 }
 
 #[tauri::command]
+async fn strong_occurrences(
+    strong: String,
+    module_id: Option<String>,
+    page: Option<u32>,
+    page_size: Option<u32>,
+    state: State<'_, AppState>,
+) -> Result<lex::StrongOccurrencesDto, ApiError> {
+    let (catalog, _) = study_snapshot(&state)?;
+    let lex_state = Arc::clone(&state.lex);
+    tauri::async_runtime::spawn_blocking(move || {
+        lex::strong_occurrences(
+            &lex_state,
+            &catalog,
+            &strong,
+            module_id.as_deref(),
+            page,
+            page_size,
+        )
+    })
+    .await
+    .map_err(|error| ApiError::internal(error.to_string()))?
+}
+
+#[tauri::command]
+async fn strong_translations(
+    strong: String,
+    module_id: Option<String>,
+    limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<lex::StrongTranslationsDto, ApiError> {
+    let (catalog, _) = study_snapshot(&state)?;
+    let lex_state = Arc::clone(&state.lex);
+    tauri::async_runtime::spawn_blocking(move || {
+        lex::strong_translations(&lex_state, &catalog, &strong, module_id.as_deref(), limit)
+    })
+    .await
+    .map_err(|error| ApiError::internal(error.to_string()))?
+}
+
+#[tauri::command]
 async fn lookup_strong(
     strong_id: String,
     state: State<'_, AppState>,
@@ -799,6 +839,8 @@ pub fn run() {
             lex_search,
             lex_entry,
             lex_related,
+            strong_occurrences,
+            strong_translations,
             get_verse_snapshot,
             get_lexicon_snapshot,
             get_commentary_index,
