@@ -38,6 +38,9 @@ export interface AppSettings {
   commentary_module_ids?: string[] | null
   study_panel_open?: boolean
   study_panel_expanded?: boolean
+  show_cantillation?: boolean
+  greek_font?: string
+  hebrew_font?: string
 }
 
 export function isReady(module: ModuleInfo): boolean {

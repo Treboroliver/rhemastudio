@@ -35,6 +35,7 @@
   import { lexSearch, type LexEntryRequest, type LexSearchHitDto, type StrongRequest, type StudyTab } from './lib/study'
   import {
     addBibleColumn,
+    applyOriginalFonts,
     applyTheme,
     bibleForShortcut,
     restoreBibleColumns,
@@ -69,7 +70,10 @@
     lexicon_module_ids: null,
     commentary_module_ids: null,
     study_panel_open: true,
-    study_panel_expanded: false
+    study_panel_expanded: false,
+    show_cantillation: false,
+    greek_font: 'auto',
+    hebrew_font: 'auto'
   }
 
   let settings = $state<AppSettings>(defaults)
@@ -737,6 +741,7 @@
     if (typeof document !== 'undefined') {
       document.documentElement.lang = settings.interface_language
       applyTheme(settings.theme, document.documentElement)
+      applyOriginalFonts(settings.greek_font, settings.hebrew_font, document.documentElement)
       document.documentElement.dataset.highlightJesus = String(settings.highlight_words_of_jesus)
     }
   })
@@ -821,6 +826,9 @@
           fontSize={settings.bible_font_size}
           showStrong={settings.show_strong_numbers}
           highlightJesusWords={settings.highlight_words_of_jesus}
+          showCantillation={settings.show_cantillation ?? false}
+          greekFont={settings.greek_font ?? 'auto'}
+          hebrewFont={settings.hebrew_font ?? 'auto'}
           theme={settings.theme}
           canAdd={selectedBibleIds.length < 4 && readyBibles.some((module) => !selectedBibleIds.includes(module.id))}
           onAdd={addBible}
@@ -832,6 +840,9 @@
           onFontSize={(direction) => void saveSettings({ bible_font_size: resizeBibleFont(settings.bible_font_size, direction) })}
           onToggleStrong={() => void saveSettings({ show_strong_numbers: !settings.show_strong_numbers })}
           onToggleJesusWords={() => void saveSettings({ highlight_words_of_jesus: !settings.highlight_words_of_jesus })}
+          onToggleCantillation={() => void saveSettings({ show_cantillation: !(settings.show_cantillation ?? false) })}
+          onGreekFontChange={(greek_font) => void saveSettings({ greek_font })}
+          onHebrewFontChange={(hebrew_font) => void saveSettings({ hebrew_font })}
           onThemeChange={(theme) => void saveSettings({ theme })}
           onStrong={openStrong}
           onInsert={insertSelectedVerse}

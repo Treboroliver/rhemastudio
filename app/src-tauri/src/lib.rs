@@ -55,6 +55,9 @@ pub struct AppSettings {
     pub study_panel_open: bool,
     pub study_panel_expanded: bool,
     pub highlight_words_of_jesus: bool,
+    pub show_cantillation: bool,
+    pub greek_font: String,
+    pub hebrew_font: String,
 }
 
 impl Default for AppSettings {
@@ -75,6 +78,9 @@ impl Default for AppSettings {
             study_panel_open: true,
             study_panel_expanded: false,
             highlight_words_of_jesus: true,
+            show_cantillation: false,
+            greek_font: "auto".to_string(),
+            hebrew_font: "auto".to_string(),
         }
     }
 }
@@ -280,6 +286,20 @@ fn validate_settings(
     }
     if settings.bible_font_size < 14 || settings.bible_font_size > 32 {
         return Err(CommandError::InvalidFontSize);
+    }
+    let valid_font = |f: &str| {
+        let t = f.trim();
+        !t.is_empty()
+            && t.chars().count() <= 64
+            && !t
+                .chars()
+                .any(|c| matches!(c, ';' | '{' | '}' | '<' | '>' | '"' | '\''))
+    };
+    if !valid_font(&settings.greek_font) {
+        settings.greek_font = "auto".to_string();
+    }
+    if !valid_font(&settings.hebrew_font) {
+        settings.hebrew_font = "auto".to_string();
     }
     let mut selected = std::collections::HashSet::new();
     settings

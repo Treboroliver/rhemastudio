@@ -1,41 +1,44 @@
 <script lang="ts">
   import NodeView from './NodeView.svelte'
   import FootnoteMarker from './FootnoteMarker.svelte'
+  import { splitScriptRuns } from './bidi'
   import { strongChain, type NodeActions, type UiNode } from './reader'
 
   interface Props {
     nodes: UiNode[]
     t: (key: string, values?: Record<string, string | number>) => string
     showStrong?: boolean
+    showCantillation?: boolean
     actions?: NodeActions
   }
 
-  let { nodes, t, showStrong = false, actions }: Props = $props()
+  let { nodes, t, showStrong = false, showCantillation = false, actions }: Props = $props()
 </script>
 
 {#each nodes as node}
   {#if node.type === 'text'}
-    {node.value}
+    {@const runs = splitScriptRuns(node.value, showCantillation)}
+    {#if runs.length === 1 && runs[0].script === 'other'}{runs[0].text}{:else}{#each runs as run}{#if run.script === 'heb'}<bdi dir="rtl" class="script-heb">{run.text}</bdi>{:else if run.script === 'grc'}<span class="script-grc">{run.text}</span>{:else}{run.text}{/if}{/each}{/if}
   {:else if node.type === 'italic'}
-    <em class="node-italic"><NodeView nodes={node.children} {t} {showStrong} {actions} /></em>
+    <em class="node-italic"><NodeView nodes={node.children} {t} {showStrong} {showCantillation} {actions} /></em>
   {:else if node.type === 'bold'}
-    <strong class="node-bold"><NodeView nodes={node.children} {t} {showStrong} {actions} /></strong>
+    <strong class="node-bold"><NodeView nodes={node.children} {t} {showStrong} {showCantillation} {actions} /></strong>
   {:else if node.type === 'underline'}
-    <u><NodeView nodes={node.children} {t} {showStrong} {actions} /></u>
+    <u><NodeView nodes={node.children} {t} {showStrong} {showCantillation} {actions} /></u>
   {:else if node.type === 'strikethrough'}
-    <s><NodeView nodes={node.children} {t} {showStrong} {actions} /></s>
+    <s><NodeView nodes={node.children} {t} {showStrong} {showCantillation} {actions} /></s>
   {:else if node.type === 'caps'}
-    <span class="node-caps"><NodeView nodes={node.children} {t} {showStrong} {actions} /></span>
+    <span class="node-caps"><NodeView nodes={node.children} {t} {showStrong} {showCantillation} {actions} /></span>
   {:else if node.type === 'superscript'}
-    <sup><NodeView nodes={node.children} {t} {showStrong} {actions} /></sup>
+    <sup><NodeView nodes={node.children} {t} {showStrong} {showCantillation} {actions} /></sup>
   {:else if node.type === 'subscript'}
-    <sub><NodeView nodes={node.children} {t} {showStrong} {actions} /></sub>
+    <sub><NodeView nodes={node.children} {t} {showStrong} {showCantillation} {actions} /></sub>
   {:else if node.type === 'wordsOfJesus'}
-    <span class="words-of-jesus"><NodeView nodes={node.children} {t} {showStrong} {actions} /></span>
+    <span class="words-of-jesus"><NodeView nodes={node.children} {t} {showStrong} {showCantillation} {actions} /></span>
   {:else if node.type === 'otQuote'}
-    <span class="ot-quote"><NodeView nodes={node.children} {t} {showStrong} {actions} /></span>
+    <span class="ot-quote"><NodeView nodes={node.children} {t} {showStrong} {showCantillation} {actions} /></span>
   {:else if node.type === 'link'}
-    <span class="node-link unknown-link" title={node.hint ? t('unknownLinkHint', { type: node.hint }) : t('unknownLinkHintGeneric')}><NodeView nodes={node.children} {t} {showStrong} {actions} /></span>
+    <span class="node-link unknown-link" title={node.hint ? t('unknownLinkHint', { type: node.hint }) : t('unknownLinkHintGeneric')}><NodeView nodes={node.children} {t} {showStrong} {showCantillation} {actions} /></span>
   {:else if node.type === 'verseLink'}
     {#if actions?.onVerse}
       <button
@@ -43,9 +46,9 @@
         type="button"
         data-verse-link={`${node.book}.${node.chapter}.${node.verse}`}
         onclick={() => actions.onVerse?.({ book: node.book, chapter: node.chapter, verse: node.verse })}
-      ><NodeView nodes={node.children} {t} {showStrong} {actions} /></button>
+      ><NodeView nodes={node.children} {t} {showStrong} {showCantillation} {actions} /></button>
     {:else}
-      <span class="node-link"><NodeView nodes={node.children} {t} {showStrong} {actions} /></span>
+      <span class="node-link"><NodeView nodes={node.children} {t} {showStrong} {showCantillation} {actions} /></span>
     {/if}
   {:else if node.type === 'entryLink'}
     {#if actions?.onEntry}
@@ -54,12 +57,12 @@
         type="button"
         data-entry-link={`${node.lang}${node.num}`}
         onclick={() => actions.onEntry?.(`${node.lang}${node.num}`)}
-      ><NodeView nodes={node.children} {t} {showStrong} {actions} /></button>
+      ><NodeView nodes={node.children} {t} {showStrong} {showCantillation} {actions} /></button>
     {:else}
-      <span class="node-link"><NodeView nodes={node.children} {t} {showStrong} {actions} /></span>
+      <span class="node-link"><NodeView nodes={node.children} {t} {showStrong} {showCantillation} {actions} /></span>
     {/if}
   {:else if node.type === 'heading'}
-    <span class="section-title" role="heading" aria-level={Math.min(node.level + 2, 6)}><NodeView nodes={node.children} {t} {showStrong} {actions} /></span>
+    <span class="section-title" role="heading" aria-level={Math.min(node.level + 2, 6)}><NodeView nodes={node.children} {t} {showStrong} {showCantillation} {actions} /></span>
   {:else if node.type === 'strong'}
     {@const chain = strongChain(node)}
     <button
@@ -68,9 +71,9 @@
       data-strong={chain.ids.join(' ')}
       type="button"
       onclick={(event) => actions?.onStrong?.(chain.ids, event.currentTarget)}
-    ><NodeView nodes={chain.children} {t} {showStrong} {actions} /></button>
+    ><NodeView nodes={chain.children} {t} {showStrong} {showCantillation} {actions} /></button>
   {:else if node.type === 'note'}
-    <FootnoteMarker {t}><NodeView nodes={node.children} {t} {showStrong} {actions} /></FootnoteMarker>
+    <FootnoteMarker {t}><NodeView nodes={node.children} {t} {showStrong} {showCantillation} {actions} /></FootnoteMarker>
   {:else if node.type === 'paragraph'}
     <span class="paragraph-break" aria-hidden="true"></span>
   {:else if node.type === 'lineBreak'}

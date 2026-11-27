@@ -5,8 +5,25 @@ export const MIN_BIBLE_FONT_SIZE = 14
 export const MAX_BIBLE_FONT_SIZE = 32
 export const DEFAULT_BIBLE_FONT_SIZE = 20
 
+export const GREEK_FONT_OPTIONS = ['auto', 'Gentium Plus', 'Gentium', 'Cardo', 'SBL Greek', 'Times New Roman'] as const
+export const HEBREW_FONT_OPTIONS = ['auto', 'SBL Hebrew', 'Ezra SIL', 'Cardo', 'Noto Serif Hebrew', 'David Libre', 'Times New Roman'] as const
+
+const GREEK_FALLBACK_STACK = "'Gentium Plus', 'Gentium', 'Cardo', 'SBL Greek', 'Galatia SIL', 'Times New Roman', serif"
+const HEBREW_FALLBACK_STACK = "'SBL Hebrew', 'Ezra SIL', 'Cardo', 'Noto Serif Hebrew', 'David Libre', 'Frank Ruhl Hofshi', 'Times New Roman', serif"
+
 export function applyTheme(theme: AppSettings['theme'], root: HTMLElement): void {
   root.dataset.theme = theme
+}
+
+export function applyOriginalFonts(
+  greekFont: string | undefined,
+  hebrewFont: string | undefined,
+  root: HTMLElement
+): void {
+  const g = greekFont && greekFont !== 'auto' ? `'${greekFont}', ${GREEK_FALLBACK_STACK}` : GREEK_FALLBACK_STACK
+  const h = hebrewFont && hebrewFont !== 'auto' ? `'${hebrewFont}', ${HEBREW_FALLBACK_STACK}` : HEBREW_FALLBACK_STACK
+  root.style.setProperty('--greek-font', g)
+  root.style.setProperty('--hebrew-font', h)
 }
 
 export function restoreBibleColumns(

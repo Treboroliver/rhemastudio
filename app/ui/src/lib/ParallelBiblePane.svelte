@@ -1,6 +1,8 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte'
   import NodeView from './NodeView.svelte'
+  import { GREEK_FONT_OPTIONS, HEBREW_FONT_OPTIONS } from './appearance'
+  import { detectColumnScript } from './bidi'
   import type { AppSettings, ModuleInfo } from './modules'
   import type { AlignedChaptersDto, ApiError } from './reader'
 
@@ -20,6 +22,9 @@
     fontSize: number
     showStrong: boolean
     highlightJesusWords: boolean
+    showCantillation?: boolean
+    greekFont?: string
+    hebrewFont?: string
     theme: AppSettings['theme']
     canAdd: boolean
     onAdd: () => void
@@ -31,6 +36,9 @@
     onFontSize: (direction: -1 | 0 | 1) => void
     onToggleStrong: () => void
     onToggleJesusWords: () => void
+    onToggleCantillation?: () => void
+    onGreekFontChange?: (font: string) => void
+    onHebrewFontChange?: (font: string) => void
     onThemeChange: (theme: AppSettings['theme']) => void
     onStrong?: (ids: string[], element: HTMLElement) => void
   }
@@ -51,6 +59,9 @@
     fontSize,
     showStrong,
     highlightJesusWords,
+    showCantillation = false,
+    greekFont = 'auto',
+    hebrewFont = 'auto',
     theme,
     canAdd,
     onAdd,
@@ -62,6 +73,9 @@
     onFontSize,
     onToggleStrong,
     onToggleJesusWords,
+    onToggleCantillation,
+    onGreekFontChange,
+    onHebrewFontChange,
     onThemeChange,
     onStrong
   }: Props = $props()
@@ -83,6 +97,9 @@
     return ordered.slice(0, 2).map((index) => ({ module: columns[index], index }))
   })
   const shownRows = $derived(aligned?.rows.slice(0, rendered) ?? [])
+  const columnScripts = $derived(
+    columns.map((module, index) => detectColumnScript(module, aligned?.rows, index))
+  )
 
   $effect(() => {
     const total = aligned?.rows.length ?? 0
@@ -197,6 +214,40 @@
             <input type="checkbox" checked={highlightJesusWords} onchange={onToggleJesusWords} />
             {t('highlightWordsOfJesus')}
           </label>
+          {#if onToggleCantillation}
+            <label class="menu-setting">
+              <input type="checkbox" checked={showCantillation} onchange={onToggleCantillation} />
+              {t('showCantillation')}
+            </label>
+          {/if}
+          {#if onGreekFontChange}
+            <label class="theme-setting">
+              <span>{t('greekFont')}</span>
+              <select
+                aria-label={t('greekFont')}
+                value={greekFont}
+                onchange={(event) => onGreekFontChange?.(event.currentTarget.value)}
+              >
+                {#each GREEK_FONT_OPTIONS as opt (opt)}
+                  <option value={opt}>{opt === 'auto' ? t('fontAuto') : opt}</option>
+                {/each}
+              </select>
+            </label>
+          {/if}
+          {#if onHebrewFontChange}
+            <label class="theme-setting">
+              <span>{t('hebrewFont')}</span>
+              <select
+                aria-label={t('hebrewFont')}
+                value={hebrewFont}
+                onchange={(event) => onHebrewFontChange?.(event.currentTarget.value)}
+              >
+                {#each HEBREW_FONT_OPTIONS as opt (opt)}
+                  <option value={opt}>{opt === 'auto' ? t('fontAuto') : opt}</option>
+                {/each}
+              </select>
+            </label>
+          {/if}
           <label class="theme-setting">
             <span>{t('theme')}</span>
             <select
@@ -279,10 +330,18 @@
             >
               {#each visibleColumns as { module, index } (module.id)}
                 {@const nodes = row.columns[index]}
-                <div class="parallel-cell" class:missing-verse={nodes === null || nodes === undefined} aria-label={nodes === null || nodes === undefined ? t('verseMissing') : undefined}>
+                {@const script = columnScripts[index] ?? 'other'}
+                <div
+                  class="parallel-cell"
+                  class:missing-verse={nodes === null || nodes === undefined}
+                  class:script-heb={script === 'heb'}
+                  class:script-grc={script === 'grc'}
+                  dir={script === 'heb' ? 'rtl' : undefined}
+                  aria-label={nodes === null || nodes === undefined ? t('verseMissing') : undefined}
+                >
                   {#if nodes}
                     <sup class="verse-number">{row.number}</sup>
-                    <NodeView {nodes} {t} showStrong={showStrong} actions={nodeActions} />
+                    <NodeView {nodes} {t} showStrong={showStrong} {showCantillation} actions={nodeActions} />
                   {:else}
                     <span class="missing-verse-space" aria-hidden="true"></span>
                   {/if}

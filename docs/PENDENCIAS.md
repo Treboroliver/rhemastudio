@@ -30,6 +30,7 @@
 - Painel de contexto ao clicar numa palavra, com atalhos de consulta por léxico (Louw-Nida e outros), pesquisa e cópia de referência.
 - Mapa de versificação entre Bíblias (diferenças de numeração entre traduções, ex.: Ap 12, 1Sm 20, 1Rs 22, 2Co 13; hoje cada Bíblia usa sua própria numeração no índice de ocorrências).
 - Filtro de idiomas ativos do índice de ocorrências nas configurações da interface (hoje fixo em português, grego e hebraico por padrão).
+- Proposta para decisão do autor: embutir fontes de licença livre (OFL), como Gentium Plus (grego politônico) e SBL Hebrew / Noto Serif Hebrew (hebraico com vogais e cantilação), acompanhadas dos respectivos arquivos de licença OFL; hoje o app usa apenas fontes já presentes no sistema ou instaladas pelo theWord (Cardo, Gentium, SBL, Ezra SIL, Noto Serif Hebrew, David Libre, Times New Roman).
 - Bíblia com números Strong a partir de texto marcado.
 - Sugestão de marcações Strong via índice reverso, sempre com revisão humana.
 - Imagens embutidas em RTF na exportação `.twm` (hoje omitidas com aviso e contagem).

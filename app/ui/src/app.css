@@ -515,3 +515,7 @@ textarea:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
 }
+.script-grc { font-family: var(--greek-font, 'Gentium Plus', 'Gentium', 'Cardo', 'SBL Greek', 'Times New Roman', serif); }
+.script-heb { font-family: var(--hebrew-font, 'SBL Hebrew', 'Ezra SIL', 'Cardo', 'Noto Serif Hebrew', 'David Libre', 'Times New Roman', serif); }
+.parallel-cell[dir="rtl"] { text-align: right; line-height: 1.9; }
+.parallel-cell[dir="rtl"] .verse-number { margin-right: 0; margin-left: 6px; }
