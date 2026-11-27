@@ -22,6 +22,8 @@ pub struct RtfConversion {
 #[derive(Clone, Default)]
 struct FormatState {
     codepage: u16,
+    font_id: Option<u16>,
+    explicit_cpg: Option<u16>,
     unicode_fallback: usize,
     bold: bool,
     italic: bool,
@@ -32,10 +34,18 @@ struct FormatState {
     subscript: bool,
 }
 
+#[derive(Clone, Copy, Default)]
+struct FontEntry {
+    codepage: Option<u16>,
+    cpg_explicit: bool,
+    is_symbol: bool,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Destination {
     Normal,
     FieldInstruction,
+    FontTable,
     Skip,
 }
 
@@ -240,11 +250,17 @@ fn convert_windowed(
         pending_high_surrogate: None,
         ansi_run: Vec::new(),
         window,
+        font_table: BTreeMap::new(),
+        default_font: 0,
+        current_font_def: None,
     };
     parser.parse();
     let mut root = parser.frames.pop().unwrap_or_else(Frame::root);
     while let Some(mut frame) = parser.frames.pop() {
-        if frame.destination != Destination::Skip {
+        if !matches!(
+            frame.destination,
+            Destination::Skip | Destination::FontTable
+        ) {
             frame.nodes.append(&mut root.nodes);
         }
         root = frame;
@@ -267,6 +283,9 @@ struct Parser<'a> {
     pending_high_surrogate: Option<u16>,
     ansi_run: Vec<u8>,
     window: Option<Window>,
+    font_table: BTreeMap<u16, FontEntry>,
+    default_font: u16,
+    current_font_def: Option<u16>,
 }
 
 impl Parser<'_> {
@@ -290,8 +309,14 @@ impl Parser<'_> {
                     self.close_group();
                 }
                 b'\\' => self.parse_escape(),
+                b';' if self.current().destination == Destination::FontTable => {
+                    self.current_font_def = None;
+                    self.cursor += 1;
+                }
                 _ => {
-                    self.ansi_run.push(byte);
+                    if self.current().destination != Destination::FontTable {
+                        self.ansi_run.push(byte);
+                    }
                     self.cursor += 1;
                 }
             }
@@ -306,15 +331,18 @@ impl Parser<'_> {
     }
 
     fn parse_escape(&mut self) {
+        if self.cursor + 1 < self.input.len() && self.input[self.cursor + 1] == b'\'' {
+            self.cursor += 1;
+            self.parse_hex_escape();
+            return;
+        }
         self.flush_ansi();
         self.cursor += 1;
         if self.cursor >= self.input.len() {
             return;
         }
         let next = self.input[self.cursor];
-        if next == b'\'' {
-            self.parse_hex_escape();
-        } else if next.is_ascii_alphabetic() {
+        if next.is_ascii_alphabetic() {
             self.parse_control_word();
         } else {
             self.cursor += 1;
@@ -389,6 +417,10 @@ impl Parser<'_> {
         if self.current().destination == Destination::Skip {
             return;
         }
+        if self.current().destination == Destination::FontTable {
+            self.apply_fonttbl_control(&name, parameter);
+            return;
+        }
         if self.current().destination == Destination::FieldInstruction {
             if name == "fldrslt" {
                 self.current().destination = Destination::Normal;
@@ -398,22 +430,74 @@ impl Parser<'_> {
         self.apply_control(&name, parameter);
     }
 
+    fn apply_fonttbl_control(&mut self, name: &str, parameter: Option<i32>) {
+        match name {
+            "f" => {
+                if let Some(id) = parameter.and_then(|v| u16::try_from(v).ok()) {
+                    self.current_font_def = Some(id);
+                    self.font_table.entry(id).or_default();
+                }
+            }
+            "fcharset" => {
+                if let (Some(fid), Some(charset)) = (self.current_font_def, parameter) {
+                    let entry = self.font_table.entry(fid).or_default();
+                    if charset == 2 {
+                        entry.is_symbol = true;
+                        entry.codepage = None;
+                    } else if !entry.cpg_explicit {
+                        entry.codepage = codepage_for_fcharset(charset);
+                    }
+                }
+            }
+            "cpg" => {
+                if let (Some(fid), Some(cp)) = (
+                    self.current_font_def,
+                    parameter.and_then(|v| u16::try_from(v).ok()),
+                ) {
+                    if cp > 0 && encoding_for_codepage(cp).is_some() {
+                        let entry = self.font_table.entry(fid).or_default();
+                        entry.codepage = Some(cp);
+                        entry.cpg_explicit = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn apply_control(&mut self, name: &str, parameter: Option<i32>) {
         match name {
-            "rtf" | "ansi" | "deff" | "deflang" | "deflangfe" | "fbidis" | "ltrdoc" | "ltrch"
-            | "rtlch" | "ltrpar" | "widctlpar" | "keep" | "keepn" | "ql" | "qj" | "qc" | "qr"
-            | "li" | "ri" | "fi" | "sb" | "sa" | "sl" | "slmult" | "fs" | "f" | "cf" | "cb"
-            | "red" | "green" | "blue" | "s" | "sbasedon" | "snext" | "ssemihidden"
-            | "sunhideused" | "fnil" | "additive" | "lang" | "langfe" | "chcbpat" | "ulc"
-            | "brdrb" | "brdrbtw" | "brdrcf" | "brdrdb" | "brdrs" | "brdrw" | "brsp" | "picw"
-            | "pich" | "picwgoal" | "pichgoal" | "picscalex" | "picscaley" | "jpegblip"
-            | "pngblip" | "bkmkstart" | "bkmkend" | "intbl" | "cell" | "cellx" | "row"
-            | "trowd" | "trgaph" | "trleft" | "trpaddl" | "trpaddt" | "trpaddr" | "trpaddb"
-            | "trpaddfl" | "trpaddft" | "trpaddfr" | "trpaddfb" | "trspdl" | "trspdfl"
-            | "trspdr" | "trspdfr" | "trspdt" | "trspdft" | "trspdb" | "trspdfb" | "trwWidth"
-            | "trftsWidth" | "richviewtbw" | "richviewcbw" | "richviewcbh" | "clwWidth"
-            | "clftsWidth" | "clbrdrr" | "clbrdrl" | "clbrdrb" | "clbrdrt" | "clvmrg"
-            | "clvmgf" | "lastrow" | "tx" | "tqc" | "tqr" | "itap" | "cbpat" => {}
+            "rtf" | "ansi" | "deflang" | "deflangfe" | "fbidis" | "ltrdoc" | "ltrch" | "rtlch"
+            | "ltrpar" | "widctlpar" | "keep" | "keepn" | "ql" | "qj" | "qc" | "qr" | "li"
+            | "ri" | "fi" | "sb" | "sa" | "sl" | "slmult" | "fs" | "cf" | "cb" | "red"
+            | "green" | "blue" | "s" | "sbasedon" | "snext" | "ssemihidden" | "sunhideused"
+            | "fnil" | "additive" | "lang" | "langfe" | "chcbpat" | "ulc" | "brdrb" | "brdrbtw"
+            | "brdrcf" | "brdrdb" | "brdrs" | "brdrw" | "brsp" | "picw" | "pich" | "picwgoal"
+            | "pichgoal" | "picscalex" | "picscaley" | "jpegblip" | "pngblip" | "bkmkstart"
+            | "bkmkend" | "intbl" | "cell" | "cellx" | "row" | "trowd" | "trgaph" | "trleft"
+            | "trpaddl" | "trpaddt" | "trpaddr" | "trpaddb" | "trpaddfl" | "trpaddft"
+            | "trpaddfr" | "trpaddfb" | "trspdl" | "trspdfl" | "trspdr" | "trspdfr" | "trspdt"
+            | "trspdft" | "trspdb" | "trspdfb" | "trwWidth" | "trftsWidth" | "richviewtbw"
+            | "richviewcbw" | "richviewcbh" | "clwWidth" | "clftsWidth" | "clbrdrr" | "clbrdrl"
+            | "clbrdrb" | "clbrdrt" | "clvmrg" | "clvmgf" | "lastrow" | "tx" | "tqc" | "tqr"
+            | "itap" | "cbpat" => {}
+            "deff" => {
+                if let Some(id) = parameter.and_then(|v| u16::try_from(v).ok()) {
+                    self.default_font = id;
+                }
+            }
+            "f" => {
+                if let Some(id) = parameter.and_then(|v| u16::try_from(v).ok()) {
+                    self.current().state.font_id = Some(id);
+                }
+            }
+            "cpg" => {
+                if let Some(cp) = parameter.and_then(|v| u16::try_from(v).ok()) {
+                    if cp > 0 && encoding_for_codepage(cp).is_some() {
+                        self.current().state.explicit_cpg = Some(cp);
+                    }
+                }
+            }
             "ansicpg" => {
                 let requested = parameter.unwrap_or(1252).clamp(0, u16::MAX as i32) as u16;
                 let codepage = if requested == 0 { 1252 } else { requested };
@@ -467,6 +551,8 @@ impl Parser<'_> {
             }
             "plain" => {
                 let state = &mut self.current().state;
+                state.font_id = None;
+                state.explicit_cpg = None;
                 state.bold = false;
                 state.italic = false;
                 state.underline = false;
@@ -486,8 +572,13 @@ impl Parser<'_> {
             "rquote" => self.append_text("\u{2019}"),
             "ldblquote" => self.append_text("\u{201c}"),
             "rdblquote" => self.append_text("\u{201d}"),
-            "fonttbl" | "colortbl" | "stylesheet" | "info" | "pict" | "object" | "header"
-            | "footer" | "generator" | "xmlopen" | "xmlclose" | "notvatxbx" => {
+            "fonttbl" => {
+                *self.stats.destinations.entry(name.to_string()).or_default() += 1;
+                self.current().destination = Destination::FontTable;
+                self.current_font_def = None;
+            }
+            "colortbl" | "stylesheet" | "info" | "pict" | "object" | "header" | "footer"
+            | "generator" | "xmlopen" | "xmlclose" | "notvatxbx" => {
                 self.set_destination(name, false);
             }
             "field" => self.current().field = true,
@@ -579,19 +670,46 @@ impl Parser<'_> {
         }
     }
 
+    fn effective_codepage(&self) -> u16 {
+        let state = &self.frames[self.frames.len().saturating_sub(1)].state;
+        if let Some(cp) = state.explicit_cpg {
+            return cp;
+        }
+        let fid = state.font_id.unwrap_or(self.default_font);
+        if let Some(entry) = self.font_table.get(&fid) {
+            if !entry.is_symbol {
+                if let Some(cp) = entry.codepage {
+                    return cp;
+                }
+            }
+        }
+        state.codepage
+    }
+
     fn flush_ansi(&mut self) {
         if self.ansi_run.is_empty() {
             return;
         }
         let bytes = std::mem::take(&mut self.ansi_run);
-        let codepage = self.current().state.codepage;
+        if matches!(
+            self.current().destination,
+            Destination::Skip | Destination::FontTable
+        ) {
+            return;
+        }
+        let codepage = self.effective_codepage();
         let encoding = encoding_for_codepage(codepage).unwrap_or(WINDOWS_1252);
         let (decoded, _, _) = encoding.decode(&bytes);
         self.append_text(&decoded);
     }
 
     fn append_text(&mut self, text: &str) {
-        if text.is_empty() || self.current().destination == Destination::Skip {
+        if text.is_empty()
+            || matches!(
+                self.current().destination,
+                Destination::Skip | Destination::FontTable
+            )
+        {
             return;
         }
         if self.pending_high_surrogate.is_some() {
@@ -654,7 +772,7 @@ impl Parser<'_> {
                     instruction.push_str(&node.to_plain_text());
                 }
             }
-            Destination::Skip => {}
+            Destination::Skip | Destination::FontTable => {}
         }
     }
 
@@ -680,7 +798,13 @@ impl Parser<'_> {
             return;
         }
         let frame = self.frames.pop().unwrap_or_else(Frame::root);
-        if frame.destination == Destination::Skip {
+        if matches!(
+            frame.destination,
+            Destination::Skip | Destination::FontTable
+        ) {
+            if frame.destination == Destination::FontTable {
+                self.current_font_def = None;
+            }
             return;
         }
         let parent = self.current();
@@ -768,6 +892,19 @@ fn hex_value(byte: u8) -> Option<u8> {
         b'0'..=b'9' => Some(byte - b'0'),
         b'a'..=b'f' => Some(byte - b'a' + 10),
         b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn codepage_for_fcharset(charset: i32) -> Option<u16> {
+    match charset {
+        161 => Some(1253), // Grego
+        177 => Some(1255), // Hebraico
+        162 => Some(1254), // Turco
+        204 => Some(1251), // Cirílico
+        238 => Some(1250), // Europa Central
+        186 => Some(1257), // Báltico
+        163 => Some(1258), // Vietnamita
         _ => None,
     }
 }
@@ -1686,6 +1823,153 @@ mod tests {
                 _ => continue,
             };
             collect_link_target_counts(children, counts);
+        }
+    }
+
+    #[test]
+    fn decodes_hex_escapes_by_active_font_fcharset_and_cpg() {
+        // fcharset 161 (grego 1253): \'e1\'e2\'e3 -> αβγ
+        // fcharset 177 (hebraico 1255): \'e0\'e1\'e2 -> אבג
+        // fcharset 0 (latim 1252): \'e7\'e3o -> ção
+        // fcharset 2 (Symbol): mantém fallback do documento (1252)
+        let rtf = br"{\rtf1\ansi\ansicpg1252\deff0{\fonttbl{\f0\fcharset0 Times;}{\f1\fcharset161 Gentium Greek;}{\f2\fcharset177 SBL Hebrew;}{\f3\fcharset2 Symbol;}{\f4\fcharset0\cpg1253 ExplicitCpg;}}\pard\f0 a\'e7\'e3o \f1\'e1\'e2\'e3 \f2\'e0\'e1\'e2 \f3\'e1 \f4\'e1\'e2 \f0 fim}";
+        let nodes = convert_rtf(rtf).unwrap();
+        let text = plain_text(&nodes);
+        assert!(text.contains("ação"), "latim regressão: {text:?}");
+        assert!(text.contains("αβγ"), "grego 1253: {text:?}");
+        assert!(text.contains("אבג"), "hebraico 1255: {text:?}");
+        assert!(text.contains(" á "), "symbol mantém 1252: {text:?}");
+        assert!(text.contains("αβ"), "cpg explícito: {text:?}");
+        assert!(text.ends_with("fim"));
+    }
+
+    #[test]
+    fn unicode_escape_takes_priority_over_font_fcharset_and_respects_uc() {
+        let rtf = br"{\rtf1\ansi\ansicpg1252\deff0{\fonttbl{\f0\fcharset0 Times;}{\f1\fcharset161 Gentium;}}\pard\f1\uc1\u945\'e2\uc2\u946\'e1\'e2\'e3}";
+        let nodes = convert_rtf(rtf).unwrap();
+        let text = plain_text(&nodes);
+        assert_eq!(text, "αβγ");
+    }
+
+    #[test]
+    fn plain_resets_font_to_default_codepage() {
+        let rtf = br"{\rtf1\ansi\ansicpg1252\deff0{\fonttbl{\f0\fcharset0 Times;}{\f1\fcharset161 Gentium;}}\pard\f1\'e1\plain \'e1}";
+        let nodes = convert_rtf(rtf).unwrap();
+        let text = plain_text(&nodes);
+        assert_eq!(text, "αá");
+    }
+
+    #[test]
+    #[ignore = "verificação E3 RTF com módulos reais via RHEMA_TEST_MODULES"]
+    fn real_modules_e3_rtf_encoding_check() {
+        let Ok(root) = std::env::var("RHEMA_TEST_MODULES") else {
+            return;
+        };
+        let has_greek = |s: &str| {
+            s.chars()
+                .any(|c| matches!(c as u32, 0x0370..=0x03FF | 0x1F00..=0x1FFF))
+        };
+        let has_hebrew = |s: &str| s.chars().any(|c| matches!(c as u32, 0x0590..=0x05FF));
+
+        let mut stack = vec![std::path::PathBuf::from(root)];
+        let mut files = Vec::new();
+        while let Some(dir) = stack.pop() {
+            if let Ok(rd) = std::fs::read_dir(&dir) {
+                for entry in rd.flatten() {
+                    let p = entry.path();
+                    if p.is_dir() {
+                        stack.push(p);
+                    } else if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                        let lower = name.to_ascii_lowercase();
+                        if lower.ends_with(".dct.twm") || lower.ends_with(".cmt.twm") {
+                            files.push(p);
+                        }
+                    }
+                }
+            }
+        }
+        files.sort();
+
+        for path in files {
+            if crate::ensure_twm_unprotected(&path).is_err() {
+                continue;
+            }
+            let Ok(db) = rusqlite::Connection::open_with_flags(
+                &path,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            ) else {
+                continue;
+            };
+            let _ = db.execute_batch("PRAGMA query_only=ON");
+            let fn_name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if fn_name.contains("Dicionário Bíblico de Strong") {
+                if let Ok(data) = db.query_row(
+                    "SELECT CAST(c.data AS BLOB) FROM topics t JOIN content c ON c.topic_id=t.id WHERE upper(trim(t.subject))='G25' LIMIT 1",
+                    [],
+                    |r| r.get::<_, Vec<u8>>(0),
+                ) {
+                    let nodes = decode_twm_content("rtf", &data).unwrap();
+                    let txt = plain_text(&nodes);
+                    println!(
+                        "E3_G25_CHECK: has_greek={} has_hebrew={}",
+                        has_greek(&txt),
+                        has_hebrew(&txt)
+                    );
+                    assert!(has_greek(&txt));
+                    assert!(has_hebrew(&txt));
+                }
+            }
+            let Ok(mut stmt) =
+                db.prepare("SELECT CAST(data AS BLOB) FROM content WHERE data IS NOT NULL")
+            else {
+                continue;
+            };
+            let Ok(mut rows) = stmt.query([]) else {
+                continue;
+            };
+            let mut declared_grc = 0usize;
+            let mut missing_grc = 0usize;
+            let mut declared_heb = 0usize;
+            let mut missing_heb = 0usize;
+            while let Ok(Some(row)) = rows.next() {
+                let Ok(data) = row.get::<_, Vec<u8>>(0) else {
+                    continue;
+                };
+                let raw = maybe_decompress_zlib(&data);
+                let s = String::from_utf8_lossy(raw.as_ref());
+                if !s.trim_start().starts_with("{\\rtf") || !s.contains("\\'") {
+                    continue;
+                }
+                let want_grc = s.contains("\\fcharset161");
+                let want_heb = s.contains("\\fcharset177");
+                if !want_grc && !want_heb {
+                    continue;
+                }
+                let Ok(nodes) = convert_rtf(raw.as_ref()) else {
+                    continue;
+                };
+                let txt = plain_text(&nodes);
+                if want_grc {
+                    declared_grc += 1;
+                    if !has_greek(&txt) {
+                        missing_grc += 1;
+                    }
+                }
+                if want_heb {
+                    declared_heb += 1;
+                    if !has_hebrew(&txt) {
+                        missing_heb += 1;
+                    }
+                }
+            }
+            if declared_grc > 0 || declared_heb > 0 {
+                println!(
+                    "E3_RTF_MOD {fn_name}: grc_decl={declared_grc} grc_miss={missing_grc} heb_decl={declared_heb} heb_miss={missing_heb}"
+                );
+            }
         }
     }
 
