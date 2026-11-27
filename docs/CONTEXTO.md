@@ -19,9 +19,9 @@ Referências: [plano](06-plano-exegese.md) e [inventário E0](07-inventario-exeg
 - A1.1: concluído — crate `rhema-import` (leitura `.docx` em fluxo, limites contra bomba de zip/entrada/imagem/tabela, gramática de marcadores, IR e relatório de validação) e CLI `rhema-cli import docx`; ver [11-importador-docx.md](11-importador-docx.md).
 - A1.2: concluído — gravador `.twm` de dicionário e comentário a partir da IR (`--out`, RTF Tahoma 10 pt com `\uN?`, `rhema_keys`, links internos/bíblicos, `--problemas`); ver [11-importador-docx.md](11-importador-docx.md).
 - A1.3: pendente — formato próprio apenas se o `.twm` não bastar, e `kind book` (`.gbk.twm`).
-- E2a: concluído — concordância por Strong (`occurrences.sqlite`, `strong_occurrences`, `strong_translations` e seção recolhível `Ocorrências` na aba Léxico); próximo: E3; ver [09-indice-lexical.md](09-indice-lexical.md).
+- E2a: concluído — concordância por Strong (`occurrences.sqlite`, `strong_occurrences`, `strong_translations` e seção recolhível `Ocorrências` na aba Léxico); ver [09-indice-lexical.md](09-indice-lexical.md).
 - E2b: pendente — interlinear.
-- E3: pendente — textos originais e morfologia.
+- E3: concluído — decodificação RTF por `\fcharset`/`\cpg`, colunas RTL, isolamento bidi, cantilação opcional, pilha de fontes locais e morfologia (`morph_decode` + cartão na aba Léxico); próximo: E2b; ver [09-indice-lexical.md](09-indice-lexical.md).
 - E4a: pendente — editor rico e persistência.
 - E4b: pendente — nós bíblicos e cartões.
 - E4c: pendente — recursos avançados do editor.

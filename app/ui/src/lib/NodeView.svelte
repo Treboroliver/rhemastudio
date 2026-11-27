@@ -69,8 +69,9 @@
       class="strong-word"
       class:show-strong={showStrong}
       data-strong={chain.ids.join(' ')}
+      data-morph={chain.morph ?? undefined}
       type="button"
-      onclick={(event) => actions?.onStrong?.(chain.ids, event.currentTarget)}
+      onclick={(event) => chain.morph ? actions?.onStrong?.(chain.ids, event.currentTarget, chain.morph) : actions?.onStrong?.(chain.ids, event.currentTarget)}
     ><NodeView nodes={chain.children} {t} {showStrong} {showCantillation} {actions} /></button>
   {:else if node.type === 'note'}
     <FootnoteMarker {t}><NodeView nodes={node.children} {t} {showStrong} {showCantillation} {actions} /></FootnoteMarker>

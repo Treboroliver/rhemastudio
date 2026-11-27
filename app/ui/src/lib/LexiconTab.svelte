@@ -11,6 +11,7 @@
     lexRelated,
     lexSearch,
     lookupStrong,
+    morphDecode,
     strongOccurrences,
     strongTranslations,
     type LexEntryRequest,
@@ -21,41 +22,52 @@
     type LexSearchDto,
     type LexSearchHitDto,
     type LexiconEntryDto,
+    type MorphDecodeDto,
     type StrongOccurrencesDto,
     type StrongRequest,
-    type StrongTranslationsDto
-  } from './study'
+    type StrongTranslationsDto,
+  } from "./study";
 
   interface Props {
-    t: (key: string, values?: Record<string, string | number>) => string
-    books?: { number: number; abbreviation: string; name?: string }[]
-    request: StrongRequest | null
-    entryRequest?: LexEntryRequest | null
-    active?: boolean
-    onVerse: (target: { book: number; chapter: number; verse: number; moduleId?: string }) => void
-    onManageFolders: () => void
-    onInsert?: (key: string) => void
-    searchFn?: (query: string, limit?: number) => Promise<LexSearchDto>
-    statusFn?: () => Promise<LexIndexStatusDto>
-    buildFn?: () => Promise<LexIndexStatusDto>
-    loadEntryFn?: (moduleId: string, key: string, topicId?: number | null) => Promise<LexiconEntryDto>
+    t: (key: string, values?: Record<string, string | number>) => string;
+    books?: { number: number; abbreviation: string; name?: string }[];
+    request: StrongRequest | null;
+    entryRequest?: LexEntryRequest | null;
+    active?: boolean;
+    onVerse: (target: {
+      book: number;
+      chapter: number;
+      verse: number;
+      moduleId?: string;
+    }) => void;
+    onManageFolders: () => void;
+    onInsert?: (key: string) => void;
+    searchFn?: (query: string, limit?: number) => Promise<LexSearchDto>;
+    statusFn?: () => Promise<LexIndexStatusDto>;
+    buildFn?: () => Promise<LexIndexStatusDto>;
+    loadEntryFn?: (
+      moduleId: string,
+      key: string,
+      topicId?: number | null,
+    ) => Promise<LexiconEntryDto>;
     loadRelatedFn?: (params: {
-      strongId?: string | null
-      moduleId?: string | null
-      key?: string | null
-      topicId?: number | null
-    }) => Promise<LexRelatedDto>
+      strongId?: string | null;
+      moduleId?: string | null;
+      key?: string | null;
+      topicId?: number | null;
+    }) => Promise<LexRelatedDto>;
     occurrencesFn?: (
       strong: string,
       moduleId?: string | null,
       page?: number,
-      pageSize?: number
-    ) => Promise<StrongOccurrencesDto>
+      pageSize?: number,
+    ) => Promise<StrongOccurrencesDto>;
     translationsFn?: (
       strong: string,
       moduleId?: string | null,
       limit?: number
     ) => Promise<StrongTranslationsDto>
+    morphDecodeFn?: (code: string, lang?: string | null) => Promise<MorphDecodeDto>
     searchDelay?: number
   }
 
@@ -64,11 +76,12 @@
     choices: string[];
     moduleId?: string;
     topicId?: number | null;
+    morph?: string | null;
   }
 
   const HISTORY_LIMIT = 50;
   const listId = $props.id();
-  const occSectionId = `${listId}-occurrences`
+  const occSectionId = `${listId}-occurrences`;
 
   let {
     t,
@@ -86,6 +99,7 @@
     loadRelatedFn = lexRelated,
     occurrencesFn = strongOccurrences,
     translationsFn = strongTranslations,
+    morphDecodeFn = morphDecode,
     searchDelay = 120,
   }: Props = $props();
 
@@ -111,89 +125,97 @@
   let indexStatus = $state<LexIndexStatusDto | null>(null);
   let unlisten: UnlistenFn | null = null;
 
-  let occOpen = $state(true)
-  let occLoading = $state(false)
-  let occErrorCode = $state<string | null>(null)
-  let occData = $state<StrongOccurrencesDto | null>(null)
-  let occTranslations = $state<StrongTranslationsDto | null>(null)
-  let occSelectedBible = $state<string | null>(null)
-  let occPage = $state(1)
-  let occSeq = 0
+  let occOpen = $state(true);
+  let occLoading = $state(false);
+  let occErrorCode = $state<string | null>(null);
+  let occData = $state<StrongOccurrencesDto | null>(null);
+  let occTranslations = $state<StrongTranslationsDto | null>(null);
+  let occSelectedBible = $state<string | null>(null);
+  let occPage = $state(1);
+  let occSeq = 0;
+
+  let morphResult = $state<MorphDecodeDto | null>(null)
+  let morphSeq = 0
 
   const current = $derived(visits.length ? visits[visits.length - 1] : null);
 
   const activeStrong = $derived.by<string | null>(() => {
-    const candidates = [current?.key, primaryEntry?.key, entry?.key]
+    const candidates = [current?.key, primaryEntry?.key, entry?.key];
     for (const c of candidates) {
       if (c && /^[GH]\d{1,5}$/i.test(c.trim())) {
-        return c.trim().toUpperCase()
+        return c.trim().toUpperCase();
       }
     }
-    return null
-  })
+    return null;
+  });
 
   const maxBookOcc = $derived.by(() => {
-    if (!occData?.by_book.length) return 1
-    return Math.max(1, ...occData.by_book.map((b) => b.occurrences))
-  })
+    if (!occData?.by_book.length) return 1;
+    return Math.max(1, ...occData.by_book.map((b) => b.occurrences));
+  });
 
   function bookLabel(bookNum: number): string {
-    const found = books.find((b) => b.number === bookNum)
-    return found?.abbreviation ?? `#${bookNum}`
+    const found = books.find((b) => b.number === bookNum);
+    return found?.abbreviation ?? `#${bookNum}`;
   }
 
   function langLabel(lang: string): string {
-    const key = `occLang_${lang}`
-    const translated = t(key)
-    return translated === key ? lang.toUpperCase() : translated
+    const key = `occLang_${lang}`;
+    const translated = t(key);
+    return translated === key ? lang.toUpperCase() : translated;
   }
 
-  async function loadOccurrences(strong: string, moduleId: string | null, page: number) {
-    const hasTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
-    if (!hasTauri && occurrencesFn === strongOccurrences) return
-    const id = ++occSeq
-    occLoading = true
-    occErrorCode = null
+  async function loadOccurrences(
+    strong: string,
+    moduleId: string | null,
+    page: number,
+  ) {
+    const hasTauri =
+      typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+    if (!hasTauri && occurrencesFn === strongOccurrences) return;
+    const id = ++occSeq;
+    occLoading = true;
+    occErrorCode = null;
     try {
-      const res = await occurrencesFn(strong, moduleId, page, 50)
-      if (id !== occSeq) return
-      occData = res
-      occSelectedBible = res.selected_module_id
-      occPage = res.page
+      const res = await occurrencesFn(strong, moduleId, page, 50);
+      if (id !== occSeq) return;
+      occData = res;
+      occSelectedBible = res.selected_module_id;
+      occPage = res.page;
       if (res.selected_module_id && res.total_occurrences > 0) {
         try {
-          const tr = await translationsFn(strong, res.selected_module_id, 12)
-          if (id === occSeq) occTranslations = tr
+          const tr = await translationsFn(strong, res.selected_module_id, 12);
+          if (id === occSeq) occTranslations = tr;
         } catch {
-          if (id === occSeq) occTranslations = null
+          if (id === occSeq) occTranslations = null;
         }
       } else {
-        occTranslations = null
+        occTranslations = null;
       }
     } catch (cause) {
-      if (id !== occSeq) return
-      occData = null
-      occTranslations = null
-      occErrorCode = asApiError(cause).code
+      if (id !== occSeq) return;
+      occData = null;
+      occTranslations = null;
+      occErrorCode = asApiError(cause).code;
     } finally {
-      if (id === occSeq) occLoading = false
+      if (id === occSeq) occLoading = false;
     }
   }
 
   function onSelectOccBible(event: Event) {
-    const mid = (event.currentTarget as HTMLSelectElement).value || null
-    occSelectedBible = mid
-    occPage = 1
+    const mid = (event.currentTarget as HTMLSelectElement).value || null;
+    occSelectedBible = mid;
+    occPage = 1;
     if (activeStrong) {
-      void loadOccurrences(activeStrong, mid, 1)
+      void loadOccurrences(activeStrong, mid, 1);
     }
   }
 
   function goOccPage(nextPage: number) {
-    if (!activeStrong || !occData) return
-    if (nextPage < 1 || nextPage > occData.total_pages) return
-    occPage = nextPage
-    void loadOccurrences(activeStrong, occSelectedBible, nextPage)
+    if (!activeStrong || !occData) return;
+    if (nextPage < 1 || nextPage > occData.total_pages) return;
+    occPage = nextPage;
+    void loadOccurrences(activeStrong, occSelectedBible, nextPage);
   }
 
   const flatHits = $derived.by<LexSearchHitDto[]>(() => {
@@ -367,16 +389,21 @@
     choices: string[],
     moduleId?: string,
     topicId?: number | null,
+    morph?: string | null,
   ) {
     if (
       current?.key === key &&
       current?.moduleId === moduleId &&
-      current?.topicId === topicId
+      current?.topicId === topicId &&
+      current?.morph === morph
     ) {
-      visits = [...visits.slice(0, -1), { key, choices, moduleId, topicId }];
+      visits = [
+        ...visits.slice(0, -1),
+        { key, choices, moduleId, topicId, morph },
+      ];
       return void load(key, moduleId, topicId);
     }
-    visits = [...visits, { key, choices, moduleId, topicId }].slice(
+    visits = [...visits, { key, choices, moduleId, topicId, morph }].slice(
       -HISTORY_LIMIT,
     );
     void load(key, moduleId, topicId);
@@ -473,7 +500,51 @@
   $effect(() => {
     const incoming = request;
     if (!incoming || !incoming.ids.length) return;
-    untrack(() => visit(incoming.ids[0], incoming.ids));
+    untrack(() =>
+      visit(
+        incoming.ids[0],
+        incoming.ids,
+        undefined,
+        undefined,
+        incoming.morph ?? null,
+      ),
+    );
+  });
+
+  $effect(() => {
+    const code = current?.morph ?? null;
+    if (!code) {
+      morphResult = null;
+      return;
+    }
+    const hasTauri =
+      typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+    if (!hasTauri && morphDecodeFn === morphDecode) {
+      morphResult = {
+        code,
+        found: false,
+        explanation: code,
+        module_id: null,
+        module_title: null,
+      };
+      return;
+    }
+    const id = ++morphSeq;
+    void morphDecodeFn(code)
+      .then((res) => {
+        if (id === morphSeq) morphResult = res;
+      })
+      .catch(() => {
+        if (id === morphSeq) {
+          morphResult = {
+            code,
+            found: false,
+            explanation: code,
+            module_id: null,
+            module_title: null,
+          };
+        }
+      });
   });
 
   $effect(() => {
@@ -485,21 +556,21 @@
   });
 
   $effect(() => {
-    const strong = activeStrong
-    const isOpen = occOpen
+    const strong = activeStrong;
+    const isOpen = occOpen;
     if (!strong || !isOpen) {
       if (!strong) {
-        occData = null
-        occTranslations = null
-        occErrorCode = null
+        occData = null;
+        occTranslations = null;
+        occErrorCode = null;
       }
-      return
+      return;
     }
     untrack(() => {
-      occPage = 1
-      void loadOccurrences(strong, occSelectedBible, 1)
-    })
-  })
+      occPage = 1;
+      void loadOccurrences(strong, occSelectedBible, 1);
+    });
+  });
 
   onMount(() => {
     const hasTauri =
@@ -510,22 +581,25 @@
     if (!hasTauri) return;
     void (async () => {
       try {
-        unlisten = await listen<LexProgressEvent>('lex-index-progress', (ev) => {
-          const p = ev.payload
-          indexStatus = {
-            state: p.state as LexIndexStatusDto['state'],
-            stage: p.stage,
-            module_index: p.module_index,
-            module_count: p.module_count,
-            percent: p.percent,
-            module_id: p.module_id,
-            entries_processed: p.entries_processed,
-            message: null
-          }
-          if (p.state === 'ready' && occOpen && activeStrong) {
-            void loadOccurrences(activeStrong, occSelectedBible, 1)
-          }
-        })
+        unlisten = await listen<LexProgressEvent>(
+          "lex-index-progress",
+          (ev) => {
+            const p = ev.payload;
+            indexStatus = {
+              state: p.state as LexIndexStatusDto["state"],
+              stage: p.stage,
+              module_index: p.module_index,
+              module_count: p.module_count,
+              percent: p.percent,
+              module_id: p.module_id,
+              entries_processed: p.entries_processed,
+              message: null,
+            };
+            if (p.state === "ready" && occOpen && activeStrong) {
+              void loadOccurrences(activeStrong, occSelectedBible, 1);
+            }
+          },
+        );
       } catch {
         // Sem runtime Tauri (ex.: vitest)
       }
@@ -813,6 +887,20 @@
             >
           {/if}
         </header>
+        {#if current?.morph}
+          <section class="lex-morph-card" aria-label={t("morphTitle")}>
+            <div class="lex-morph-head">
+              <span class="lex-morph-label">{t("morphTitle")}</span>
+              <code class="lex-morph-code">{current.morph}</code>
+            </div>
+            {#if morphResult}
+              <p class="lex-morph-desc">{morphResult.explanation}</p>
+              {#if morphResult.module_title}
+                <p class="panel-note">{morphResult.module_title}</p>
+              {/if}
+            {/if}
+          </section>
+        {/if}
         {#if entry.degraded}<p class="panel-note" role="status">
             {t("contentDegraded")}
           </p>{/if}
@@ -820,7 +908,7 @@
       </article>
 
       {#if activeStrong}
-        <section class="lex-occurrences" aria-label={t('occTitle')}>
+        <section class="lex-occurrences" aria-label={t("occTitle")}>
           <button
             type="button"
             class="occ-toggle"
@@ -828,57 +916,63 @@
             aria-controls={occSectionId}
             onclick={() => (occOpen = !occOpen)}
           >
-            <span>{t('occTitle')}</span>
+            <span>{t("occTitle")}</span>
             <span class="occ-toggle-meta">
               {#if occData && occData.total_occurrences > 0}
                 {occData.total_occurrences}
               {/if}
-              {occOpen ? '▾' : '▸'}
+              {occOpen ? "▾" : "▸"}
             </span>
           </button>
 
           {#if occOpen}
             <div class="occ-body" id={occSectionId}>
-              {#if indexStatus?.state === 'building' || occErrorCode === 'lex_index_building'}
-                <p class="panel-empty" role="status">{t('occBuilding')}</p>
+              {#if indexStatus?.state === "building" || occErrorCode === "lex_index_building"}
+                <p class="panel-empty" role="status">{t("occBuilding")}</p>
               {:else if occLoading}
-                <p class="panel-empty" role="status">{t('occLoading')}</p>
+                <p class="panel-empty" role="status">{t("occLoading")}</p>
               {:else if occErrorCode}
-                <p class="panel-empty" role="alert">{t('occError')}</p>
+                <p class="panel-empty" role="alert">{t("occError")}</p>
               {:else if occData}
                 {#if occData.bibles.length === 0}
-                  <p class="panel-empty" role="status">{t('occNoStrongBible')}</p>
+                  <p class="panel-empty" role="status">
+                    {t("occNoStrongBible")}
+                  </p>
                 {:else}
                   <div class="occ-controls">
                     <label class="occ-bible-label">
-                      <span>{t('occBibleLabel')}</span>
+                      <span>{t("occBibleLabel")}</span>
                       <select
                         class="occ-bible-select"
-                        aria-label={t('occBibleLabel')}
-                        value={occSelectedBible ?? ''}
+                        aria-label={t("occBibleLabel")}
+                        value={occSelectedBible ?? ""}
                         onchange={onSelectOccBible}
                       >
                         {#each occData.bibles as bible (bible.module_id)}
                           <option value={bible.module_id}>
-                            {bible.abbreviation ?? bible.title} ({langLabel(bible.lang)}) · {bible.total_occurrences}
+                            {bible.abbreviation ?? bible.title} ({langLabel(
+                              bible.lang,
+                            )}) · {bible.total_occurrences}
                           </option>
                         {/each}
                       </select>
                     </label>
                     <p class="occ-summary" role="status">
-                      {t('occSummary', {
+                      {t("occSummary", {
                         verses: occData.total_verses,
-                        occurrences: occData.total_occurrences
+                        occurrences: occData.total_occurrences,
                       })}
                     </p>
                   </div>
 
                   {#if occData.total_occurrences === 0}
-                    <p class="panel-empty" role="status">{t('occEmpty', { strong: occData.strong })}</p>
+                    <p class="panel-empty" role="status">
+                      {t("occEmpty", { strong: occData.strong })}
+                    </p>
                   {:else}
                     {#if occTranslations && occTranslations.items.length > 0}
                       <div class="occ-block">
-                        <h4 class="occ-subtitle">{t('occTranslations')}</h4>
+                        <h4 class="occ-subtitle">{t("occTranslations")}</h4>
                         <div class="occ-chips" role="list">
                           {#each occTranslations.items as item (item.word)}
                             <span
@@ -895,18 +989,21 @@
 
                     {#if occData.by_book.length > 0}
                       <div class="occ-block">
-                        <h4 class="occ-subtitle">{t('occByBook')}</h4>
+                        <h4 class="occ-subtitle">{t("occByBook")}</h4>
                         <ul class="occ-books">
                           {#each occData.by_book as b (b.book)}
                             <li class="occ-book-row">
-                              <span class="occ-book-name">{bookLabel(b.book)}</span>
+                              <span class="occ-book-name"
+                                >{bookLabel(b.book)}</span
+                              >
                               <span class="occ-bar-track" aria-hidden="true">
                                 <span
                                   class="occ-bar-fill"
                                   style={`width: ${Math.max(4, Math.round((b.occurrences / maxBookOcc) * 100))}%`}
                                 ></span>
                               </span>
-                              <span class="occ-book-count">{b.occurrences}</span>
+                              <span class="occ-book-count">{b.occurrences}</span
+                              >
                             </li>
                           {/each}
                         </ul>
@@ -914,7 +1011,7 @@
                     {/if}
 
                     <div class="occ-block">
-                      <h4 class="occ-subtitle">{t('occReferences')}</h4>
+                      <h4 class="occ-subtitle">{t("occReferences")}</h4>
                       <ul class="occ-refs">
                         {#each occData.items as item (`${item.book}-${item.chapter}-${item.verse}`)}
                           <li>
@@ -926,10 +1023,10 @@
                                   book: item.book,
                                   chapter: item.chapter,
                                   verse: item.verse,
-                                  moduleId: occSelectedBible ?? undefined
+                                  moduleId: occSelectedBible ?? undefined,
                                 })}
                             >
-                              {bookLabel(item.book)} {item.chapter}:{item.verse}{#if item.n > 1}{' '}({item.n}×){/if}
+                              {`${bookLabel(item.book)} ${item.chapter}:${item.verse}${item.n > 1 ? ` (${item.n}×)` : ""}`}
                             </button>
                           </li>
                         {/each}
@@ -941,16 +1038,21 @@
                             class="quiet compact-control"
                             disabled={occPage <= 1}
                             onclick={() => goOccPage(occPage - 1)}
-                          >{t('occPrevPage')}</button>
+                            >{t("occPrevPage")}</button
+                          >
                           <span class="occ-page-info">
-                            {t('occPage', { page: occPage, total: occData.total_pages })}
+                            {t("occPage", {
+                              page: occPage,
+                              total: occData.total_pages,
+                            })}
                           </span>
                           <button
                             type="button"
                             class="quiet compact-control"
                             disabled={occPage >= occData.total_pages}
                             onclick={() => goOccPage(occPage + 1)}
-                          >{t('occNextPage')}</button>
+                            >{t("occNextPage")}</button
+                          >
                         </div>
                       {/if}
                     </div>
@@ -998,6 +1100,39 @@
 </div>
 
 <style>
+  .lex-morph-card {
+    margin: 0.5rem 0 0.75rem;
+    padding: 0.5rem 0.65rem;
+    border: 1px solid var(--border, rgba(128, 128, 128, 0.3));
+    border-radius: 6px;
+    background: var(--surface, rgba(128, 128, 128, 0.08));
+  }
+
+  .lex-morph-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .lex-morph-label {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.75;
+  }
+
+  .lex-morph-code {
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .lex-morph-desc {
+    margin: 0;
+    font-size: 0.88rem;
+  }
+
   .lex-occurrences {
     margin-top: 1rem;
     border-top: 1px solid var(--border, rgba(128, 128, 128, 0.25));

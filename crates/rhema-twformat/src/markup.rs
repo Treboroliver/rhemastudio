@@ -247,7 +247,10 @@ fn parse_token(contents: &str) -> Token {
         return Token::Grammar(grammar.0, grammar.1);
     }
     if let Some(payload) = tag.strip_prefix("WT") {
-        return Token::Inline(Node::Morph(payload.to_string()));
+        let code = payload.split_whitespace().next().unwrap_or_default().trim();
+        if !code.is_empty() {
+            return Token::Inline(Node::Morph(code.to_string()));
+        }
     }
     if let Some(payload) = tag.strip_prefix("RX") {
         if let Some(range) = parse_xref(payload) {

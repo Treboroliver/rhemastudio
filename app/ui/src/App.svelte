@@ -473,11 +473,11 @@
     if (target?.isConnected) target.focus()
   }
 
-  function openStrong(ids: string[], element: HTMLElement) {
+  function openStrong(ids: string[], element: HTMLElement, morph?: string | null) {
     strongAnchor?.removeAttribute('data-strong-active')
     strongAnchor = element
     element.setAttribute('data-strong-active', 'true')
-    strongRequest = { ids, seq: ++strongSequence }
+    strongRequest = { ids, morph: morph ?? null, seq: ++strongSequence }
     studyTab = 'lexicon'
     if (!studyOpen) {
       panelReturnFocus = element

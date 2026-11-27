@@ -125,6 +125,7 @@
   "lexOtherDictionariesLabel": "Other dictionaries with related entries",
   "lexPrimaryEntry": "Primary",
   "occTitle": "Occurrences",
+  "morphTitle": "Morphology",
   "occBibleLabel": "Bible with Strong",
   "occSummary": "{verses} verses · {occurrences} occurrences",
   "occByBook": "By book",

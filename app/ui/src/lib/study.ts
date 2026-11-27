@@ -195,6 +195,17 @@ export const strongTranslations = (
     limit: limit ?? 15
   })
 
+export interface MorphDecodeDto {
+  code: string
+  found: boolean
+  explanation: string
+  module_id: string | null
+  module_title: string | null
+}
+
+export const morphDecode = (code: string, lang?: string | null) =>
+  invoke<MorphDecodeDto>('morph_decode', { code, lang: lang ?? null })
+
 export const lookupStrong = (strongId: string) =>
   invoke<LexiconEntryDto>('lookup_strong', { strongId })
 
@@ -252,6 +263,7 @@ export const getCommentaryEntry = (moduleId: string, topicId: number, offset: nu
 /** Uma palavra clicada no texto bíblico: um ou mais números de Strong, do mais externo ao mais interno. */
 export interface StrongRequest {
   ids: string[]
+  morph?: string | null
   seq: number
 }
 

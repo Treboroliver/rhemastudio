@@ -11,7 +11,8 @@ Marque `[x]` ao concluir. Cada milestone só termina quando **todos** os critér
 - [x] E1b.3 Abertura por `topic_id`, títulos limpos e seleção de pastas tolerante; ver [09-indice-lexical.md](09-indice-lexical.md).
 - [x] E1b.4 Abertura dos dicionários comuns, lemas/refs em genéricos (`v3`) e `Outros dicionários (N)` (`lex_related`); ver [09-indice-lexical.md](09-indice-lexical.md).
 - [x] E1b.5 Links inline (`\fldrslt`), zlib (`compressed=1`), classificação `config.type`, `meta`, `hidden=1` e erros de comentário; ver [09-indice-lexical.md](09-indice-lexical.md).
-- [x] E2a Concordância por Strong (`occurrences.sqlite`, `strong_occurrences`/`strong_translations` e seção recolhível `Ocorrências` na aba Léxico; próximo: E3); ver [09-indice-lexical.md](09-indice-lexical.md).
+- [x] E2a Concordância por Strong (`occurrences.sqlite`, `strong_occurrences`/`strong_translations` e seção recolhível `Ocorrências` na aba Léxico); ver [09-indice-lexical.md](09-indice-lexical.md).
+- [x] E3 Grego e hebraico legíveis (RTF `\fcharset`/`\cpg`, colunas RTL, bidi por trecho, cantilação opcional, fontes locais e morfologia `morph_decode`; próximo: E2b); ver [09-indice-lexical.md](09-indice-lexical.md).
 
 ## Autoria — A1
 - [x] A1.1 Importador de livros pessoais (`.docx`) — leitura em fluxo, reconhecimento de marcadores, IR e relatório de validação (`rhema-import` e `rhema-cli import docx`); ver [11-importador-docx.md](11-importador-docx.md).

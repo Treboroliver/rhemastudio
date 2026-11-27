@@ -40,7 +40,7 @@
     onGreekFontChange?: (font: string) => void
     onHebrewFontChange?: (font: string) => void
     onThemeChange: (theme: AppSettings['theme']) => void
-    onStrong?: (ids: string[], element: HTMLElement) => void
+    onStrong?: (ids: string[], element: HTMLElement, morph?: string | null) => void
   }
 
   let {
@@ -80,7 +80,10 @@
     onStrong
   }: Props = $props()
 
-  const nodeActions = { onStrong: (ids: string[], element: HTMLElement) => onStrong?.(ids, element) }
+  const nodeActions = {
+    onStrong: (ids: string[], element: HTMLElement, morph?: string | null) =>
+      onStrong?.(ids, element, morph)
+  }
 
   let viewportWidth = $state(typeof window === 'undefined' ? 1200 : window.innerWidth)
   let rendered = $state(20)

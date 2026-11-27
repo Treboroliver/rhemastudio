@@ -5,9 +5,10 @@ use std::sync::{Arc, Mutex};
 
 use rhema_core::ModuleKind;
 use rhema_lexicon::{
-    BookOccurrenceCount, LexKind, LexiconError, LexiconIndex, MatchField, OccurrenceBibleInfo,
-    OccurrencesIndex, SearchFilters, SearchResults, TranslationCount, VerseOccurrence, build_index,
-    build_links, build_reverse_and_occurrences, validate_strong_number,
+    BookOccurrenceCount, LexKind, LexiconError, LexiconIndex, MatchField, MorphDecodeResult,
+    MorphDecoder, OccurrenceBibleInfo, OccurrencesIndex, SearchFilters, SearchResults,
+    TranslationCount, VerseOccurrence, build_index, build_links, build_reverse_and_occurrences,
+    validate_strong_number,
 };
 use rhema_library::{ModuleInfo, ModuleState};
 use serde::Serialize;
@@ -36,6 +37,7 @@ pub struct LexState {
     progress: Mutex<BuildProgressState>,
     index: Mutex<Option<Arc<LexiconIndex>>>,
     occurrences: Mutex<Option<OccurrencesIndex>>,
+    morph: Mutex<Option<MorphDecoder>>,
 }
 
 impl LexState {
@@ -46,6 +48,7 @@ impl LexState {
             progress: Mutex::new(BuildProgressState::default()),
             index: Mutex::new(None),
             occurrences: Mutex::new(None),
+            morph: Mutex::new(None),
         }
     }
 
@@ -111,6 +114,9 @@ impl LexState {
             *guard = None;
         }
         if let Ok(mut guard) = self.occurrences.lock() {
+            *guard = None;
+        }
+        if let Ok(mut guard) = self.morph.lock() {
             *guard = None;
         }
     }
@@ -1049,6 +1055,32 @@ pub fn strong_translations(
         total: result.total,
         items: result.items,
     })
+}
+
+pub fn morph_decode(
+    state: &LexState,
+    catalog: &[ModuleInfo],
+    code: &str,
+    lang: Option<&str>,
+) -> Result<MorphDecodeResult, ApiError> {
+    let mut guard = state
+        .morph
+        .lock()
+        .map_err(|_| ApiError::internal("cache de morfologia indisponível"))?;
+    if guard.is_none() {
+        let dict_paths: Vec<PathBuf> = catalog
+            .iter()
+            .filter(|m| m.kind == ModuleKind::Dictionary && m.state == ModuleState::Ready)
+            .map(|m| m.path.clone())
+            .collect();
+        *guard = Some(MorphDecoder::from_paths(&dict_paths));
+    }
+    let decoder = guard
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("decodificador de morfologia indisponível"))?;
+    decoder
+        .decode(code, lang)
+        .map_err(|e| ApiError::new("invalid_argument", e.to_string()))
 }
 
 #[cfg(test)]

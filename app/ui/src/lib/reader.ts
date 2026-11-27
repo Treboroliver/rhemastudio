@@ -18,7 +18,7 @@ export type UiNode =
   | { type: 'verseLink'; book: number; chapter: number; verse: number; children: UiNode[] }
   | { type: 'entryLink'; lang: 'G' | 'H'; num: number; children: UiNode[] }
   | { type: 'heading'; level: number; children: UiNode[] }
-  | { type: 'strong'; lang: 'G' | 'H'; num: number; children: UiNode[] }
+  | { type: 'strong'; lang: 'G' | 'H'; num: number; morph?: string; children: UiNode[] }
   | { type: 'paragraph' }
   | { type: 'lineBreak' }
 
@@ -49,28 +49,33 @@ export function splitParagraphs(nodes: UiNode[]): UiNode[][] {
 
 /** Ações de clique do conteúdo renderizado; sem uma ação, o nó aparece como texto simples. */
 export interface NodeActions {
-  /** Palavra com um ou mais Strong (do mais externo ao mais interno) e o elemento clicado. */
-  onStrong?: (ids: string[], element: HTMLElement) => void
+  /** Palavra com um ou mais Strong (do mais externo ao mais interno), elemento clicado e morfologia opcional. */
+  onStrong?: (ids: string[], element: HTMLElement, morph?: string | null) => void
   onVerse?: (target: { book: number; chapter: number; verse: number }) => void
   /** Chave de verbete, como `G25`. */
   onEntry?: (id: string) => void
 }
 
 /**
- * Strong consecutivos sobre a mesma palavra chegam aninhados. Devolve todos os números e o
- * conteúdo da palavra, para renderizar um único botão por palavra.
+ * Strong consecutivos sobre a mesma palavra chegam aninhados. Devolve todos os números, a
+ * morfologia associada (quando houver) e o conteúdo da palavra, para renderizar um único botão.
  */
 export function strongChain(node: Extract<UiNode, { type: 'strong' }>): {
   ids: string[]
+  morph?: string
   children: UiNode[]
 } {
   const ids: string[] = []
+  let morph: string | undefined
   let current: Extract<UiNode, { type: 'strong' }> = node
   for (;;) {
     const id = `${current.lang}${current.num}`
     if (!ids.includes(id)) ids.push(id)
+    if (!morph && current.morph) morph = current.morph
     const only = current.children.length === 1 ? current.children[0] : null
-    if (!only || only.type !== 'strong') return { ids, children: current.children }
+    if (!only || only.type !== 'strong') {
+      return morph ? { ids, morph, children: current.children } : { ids, children: current.children }
+    }
     current = only
   }
 }

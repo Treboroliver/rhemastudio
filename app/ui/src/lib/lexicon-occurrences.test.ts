@@ -219,4 +219,46 @@ describe('Seção Ocorrências na aba Léxico (E2a)', () => {
     })
     expect(await screen.findByText('Nenhuma Bíblia com números de Strong disponível no índice.')).toBeTruthy()
   })
+
+  it('mostra cartão de morfologia decodificada quando há código e oculta quando não há', async () => {
+    // 1) Com morfologia
+    render(LexiconTab, {
+      props: {
+        t,
+        books,
+        request: { ids: ['G25'], morph: 'V-AAI-3S', seq: 10 },
+        onVerse: vi.fn(),
+        onManageFolders: vi.fn(),
+        loadRelatedFn: vi.fn().mockResolvedValue(sampleRelated),
+        occurrencesFn: vi.fn().mockResolvedValue(page1Dto),
+        translationsFn: vi.fn().mockResolvedValue(transDto),
+        morphDecodeFn: vi.fn().mockResolvedValue({
+          code: 'V-AAI-3S',
+          found: true,
+          explanation: 'Verbo, aoristo, ativo, indicativo, 3ª pessoa, singular',
+          module_id: 'robinson',
+          module_title: 'Robinson PT'
+        })
+      }
+    })
+    expect(await screen.findByText('V-AAI-3S')).toBeTruthy()
+    expect(await screen.findByText('Verbo, aoristo, ativo, indicativo, 3ª pessoa, singular')).toBeTruthy()
+    cleanup()
+
+    // 2) Sem morfologia (Bíblia sem tags WT): bloco não aparece
+    const { container } = render(LexiconTab, {
+      props: {
+        t,
+        books,
+        request: { ids: ['G25'], seq: 11 },
+        onVerse: vi.fn(),
+        onManageFolders: vi.fn(),
+        loadRelatedFn: vi.fn().mockResolvedValue(sampleRelated),
+        occurrencesFn: vi.fn().mockResolvedValue(page1Dto),
+        translationsFn: vi.fn().mockResolvedValue(transDto)
+      }
+    })
+    expect(await screen.findByText('3 versículos · 4 ocorrências')).toBeTruthy()
+    expect(container.querySelector('.lex-morph-card')).toBeNull()
+  })
 })

@@ -1,6 +1,7 @@
 mod extract;
 mod index;
 mod links;
+mod morph;
 mod occurrences;
 mod query;
 mod reverse;
@@ -20,6 +21,7 @@ pub use index::{
 pub use links::{
     build_links, links_for_ditnt, links_for_strong, BuildReport, LexiconError, Link, LinkKind,
 };
+pub use morph::{MorphDecodeResult, MorphDecoder};
 pub use occurrences::{
     build_occurrences_index, build_occurrences_index_with_languages, build_reverse_and_occurrences,
     default_occurrences_path, detect_bible_language, validate_strong_number, BibleOccurrencesStats,

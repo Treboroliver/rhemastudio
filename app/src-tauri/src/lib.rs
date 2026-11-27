@@ -410,6 +410,7 @@ fn library_scan(
         .catalog
         .lock()
         .map_err(|_| "catálogo indisponível".to_string())? = modules.clone();
+    state.lex.invalidate_cache();
     if lex::index_status(&state.lex, &modules).state == "rebuild_needed" {
         let scan_folders = lex::collect_scan_folders(&modules, &folders);
         if !scan_folders.is_empty() {
@@ -641,6 +642,21 @@ async fn strong_translations(
 }
 
 #[tauri::command]
+async fn morph_decode(
+    code: String,
+    lang: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<rhema_lexicon::MorphDecodeResult, ApiError> {
+    let (catalog, _) = study_snapshot(&state)?;
+    let lex_state = Arc::clone(&state.lex);
+    tauri::async_runtime::spawn_blocking(move || {
+        lex::morph_decode(&lex_state, &catalog, &code, lang.as_deref())
+    })
+    .await
+    .map_err(|error| ApiError::internal(error.to_string()))?
+}
+
+#[tauri::command]
 async fn lookup_strong(
     strong_id: String,
     state: State<'_, AppState>,
@@ -861,6 +877,7 @@ pub fn run() {
             lex_related,
             strong_occurrences,
             strong_translations,
+            morph_decode,
             get_verse_snapshot,
             get_lexicon_snapshot,
             get_commentary_index,

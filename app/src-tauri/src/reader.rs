@@ -107,6 +107,8 @@ pub enum UiNode {
     Strong {
         lang: &'static str,
         num: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        morph: Option<String>,
         children: Vec<UiNode>,
     },
     Note {
@@ -205,6 +207,7 @@ fn convert_node(node: &Node, out: &mut Vec<UiNode>) {
                         StrongLang::Hebrew => "H",
                     },
                     num: *num,
+                    morph: None,
                     children,
                 });
             }
@@ -220,7 +223,43 @@ fn convert_node(node: &Node, out: &mut Vec<UiNode>) {
                 convert_node(child, out);
             }
         }
-        Node::Grammar { .. } | Node::Morph(_) | Node::XRef(_) => {}
+        Node::Morph(code) => {
+            let clean = code.split_whitespace().next().unwrap_or_default().trim();
+            if !clean.is_empty() {
+                attach_morph_to_last_strong(out, clean);
+            }
+        }
+        Node::Grammar { .. } | Node::XRef(_) => {}
+    }
+}
+
+fn attach_morph_to_last_strong(nodes: &mut [UiNode], code: &str) -> bool {
+    let Some(last) = nodes.last_mut() else {
+        return false;
+    };
+    match last {
+        UiNode::Strong {
+            morph, children, ..
+        } => {
+            if !attach_morph_to_last_strong(children, code) && morph.is_none() {
+                *morph = Some(code.to_string());
+            }
+            true
+        }
+        UiNode::Italic { children }
+        | UiNode::Bold { children }
+        | UiNode::Underline { children }
+        | UiNode::Strikethrough { children }
+        | UiNode::Caps { children }
+        | UiNode::Superscript { children }
+        | UiNode::Subscript { children }
+        | UiNode::WordsOfJesus { children }
+        | UiNode::OtQuote { children }
+        | UiNode::Heading { children, .. }
+        | UiNode::Link { children, .. }
+        | UiNode::VerseLink { children, .. }
+        | UiNode::EntryLink { children, .. } => attach_morph_to_last_strong(children, code),
+        _ => false,
     }
 }
 
@@ -1384,5 +1423,25 @@ mod tests {
             elapsed_max
         );
         assert_eq!(chapter_count, 1189);
+    }
+
+    #[test]
+    fn attaches_morphology_to_strong_word_and_preserves_unknown_tags() {
+        let nodes = rhema_twformat::tokenize_markup(r#"luz<WG3056><WTN-NSF l="abc"> <ZZ>ok</ZZ>"#);
+        assert!(
+            nodes
+                .iter()
+                .any(|n| matches!(n, Node::UnknownTag { name, .. } if name == "ZZ"))
+        );
+        let ui = convert_nodes(&nodes);
+        assert!(matches!(
+            &ui[0],
+            UiNode::Strong {
+                lang: "G",
+                num: 3056,
+                morph: Some(code),
+                ..
+            } if code == "N-NSF"
+        ));
     }
 }

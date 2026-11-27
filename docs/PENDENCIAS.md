@@ -36,4 +36,4 @@
 - Imagens embutidas em RTF na exportação `.twm` (hoje omitidas com aviso e contagem).
 - Exportação de livros gerais (`--kind book` / `.gbk.twm`).
 - Validação manual dos módulos `.twm` gerados diretamente no software theWord.
-- Morfologia nas Bíblias (tags `wt` e semelhantes da KJFiel+, ~309 mil ocorrências): hoje preservadas como `UnknownTag` sem interpretação; tratar junto com os dicionários de códigos morfológicos de Robinson.
+- Morfologia nas Bíblias: códigos Robinson (`<WT...>` de KJFiel+ e bizinterlinear.nt) já são decodificados via dicionários `morph=1` do usuário; esquemas não-Robinson (tags morfológicas de AT da ACF 2011+ e esquema próprio da BSB Interlinear) exibem o código cru até existir dicionário `morph=1` compatível.
